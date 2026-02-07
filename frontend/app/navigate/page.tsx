@@ -48,7 +48,6 @@ const CameraStream = dynamic(
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
-const START_ROOM = "0020";
 
 interface PathNode {
   x: number;
@@ -67,6 +66,7 @@ export default function NavigatePage() {
   // ── Navigation state ──
   const [navPath, setNavPath] = useState<PathNode[]>([]);
   const [destination, setDestination] = useState<string | null>(null);
+  const [startRoom, setStartRoom] = useState<string | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const [instruction, setInstruction] = useState("");
 
@@ -76,7 +76,8 @@ export default function NavigatePage() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   // ── Manual input ──
-  const [manualDest, setManualDest] = useState("");
+  const [manualFrom, setManualFrom] = useState("");
+  const [manualTo, setManualTo] = useState("");
   const [showManual, setShowManual] = useState(false);
 
   // ── Status ──
@@ -130,7 +131,7 @@ export default function NavigatePage() {
 
     recognition.onstart = () => {
       setIsListening(true);
-      setStatus("🎤 Listening...");
+      setStatus("🎤 Say: 'I'm in room X, take me to room Y'");
     };
 
     recognition.onresult = (ev: any) => {
@@ -141,7 +142,7 @@ export default function NavigatePage() {
     };
 
     recognition.onerror = () => {
-      setStatus("Try again or type room number");
+      setStatus("Try again or type room numbers below");
       setShowManual(true);
       setIsListening(false);
     };
@@ -152,7 +153,7 @@ export default function NavigatePage() {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, []);
+  }, [parseNavCommand]);
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();
@@ -160,22 +161,28 @@ export default function NavigatePage() {
   }, []);
 
   // ── Parse navigation command (with timeout) ──
+  // text can be natural language: "I'm in room 0020, take me to room 0010"
+  // or explicit params via explicitStart / explicitDest
   const parseNavCommand = useCallback(
-    async (text: string) => {
+    async (text: string, explicitStart?: string, explicitDest?: string) => {
       setStatus("Finding route...");
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
+      const timer = setTimeout(() => controller.abort(), 15000);
       try {
+        // Build the request body
+        const body: Record<string, string> = { text };
+        if (explicitStart) body.start_room = explicitStart;
+
         const res = await fetch(`${BACKEND_URL}/navigate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text, start_room: START_ROOM }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          throw new Error(errText || "Navigation failed");
+          const errData = await res.json().catch(() => ({ error: "Navigation failed" }));
+          throw new Error(errData.error || `Server ${res.status}`);
         }
 
         const data = await res.json();
@@ -184,9 +191,12 @@ export default function NavigatePage() {
         // Start navigation
         setNavPath(data.path || []);
         setDestination(data.destination);
+        setStartRoom(data.start_room || explicitStart || null);
         setIsNavigating(true);
         setInstruction(data.instruction || "");
-        setStatus(`🧭 Navigating to room ${data.destination}`);
+        setStatus(
+          `🧭 Room ${data.start_room || "?"} → Room ${data.destination}`
+        );
 
         // Announce the instruction
         speak(
@@ -199,7 +209,7 @@ export default function NavigatePage() {
             ? "Navigation request timed out"
             : err.message || "Failed to find path";
         setStatus("❌ " + msg);
-        speak("I couldn't find a path to that room.");
+        speak("I couldn't find a path. Please say which room you are in and where you want to go.");
         setShowManual(true);
       } finally {
         clearTimeout(timer);
@@ -213,6 +223,7 @@ export default function NavigatePage() {
     setIsNavigating(false);
     setNavPath([]);
     setDestination(null);
+    setStartRoom(null);
     setInstruction("");
     stopAudio();
     setStatus("Navigation stopped");
@@ -273,7 +284,7 @@ export default function NavigatePage() {
       await speak(announcement);
       setStatus(
         isNavigating
-          ? `🧭 Navigating to room ${destination}`
+          ? `🧭 Room ${startRoom || "?"} → Room ${destination}`
           : "Camera on — tap What's Ahead"
       );
     } catch (err: any) {
@@ -286,15 +297,21 @@ export default function NavigatePage() {
     } finally {
       clearTimeout(timer);
     }
-  }, [speak, stopAudio, isSpeakingRef, isNavigating, destination]);
+  }, [speak, stopAudio, isSpeakingRef, isNavigating, destination, startRoom]);
 
   // ── Manual destination ──
   const handleManualGo = useCallback(() => {
-    if (manualDest.trim()) {
-      parseNavCommand("go to room " + manualDest.trim());
+    const from = manualFrom.trim();
+    const to = manualTo.trim();
+    if (from && to) {
+      parseNavCommand(
+        `I am in room ${from}, take me to room ${to}`,
+        from,
+        to
+      );
       setShowManual(false);
     }
-  }, [manualDest, parseNavCommand]);
+  }, [manualFrom, manualTo, parseNavCommand]);
 
   // Auto-connect on mount
   useEffect(() => {
@@ -361,22 +378,31 @@ export default function NavigatePage() {
           </div>
         )}
 
-        {/* Manual entry */}
+        {/* Manual entry — from + to */}
         {showManual && (
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={manualDest}
-              onChange={(e) => setManualDest(e.target.value)}
-              placeholder="Room (e.g. 0010)"
-              className="flex-1 rounded-lg bg-slate-800 border border-emerald-500/50 px-3 py-2 text-sm text-white placeholder-slate-500"
-              onKeyDown={(e) => e.key === "Enter" && handleManualGo()}
-            />
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={manualFrom}
+                onChange={(e) => setManualFrom(e.target.value)}
+                placeholder="From room (e.g. 0020)"
+                className="flex-1 rounded-lg bg-slate-800 border border-emerald-500/50 px-3 py-2 text-sm text-white placeholder-slate-500"
+              />
+              <input
+                type="text"
+                value={manualTo}
+                onChange={(e) => setManualTo(e.target.value)}
+                placeholder="To room (e.g. 0010)"
+                className="flex-1 rounded-lg bg-slate-800 border border-emerald-500/50 px-3 py-2 text-sm text-white placeholder-slate-500"
+                onKeyDown={(e) => e.key === "Enter" && handleManualGo()}
+              />
+            </div>
             <button
               onClick={handleManualGo}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-emerald-400 transition-colors"
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-900 hover:bg-emerald-400 transition-colors w-full"
             >
-              Go
+              Navigate
             </button>
           </div>
         )}

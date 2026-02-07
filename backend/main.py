@@ -31,6 +31,7 @@ from services.depth import DepthEstimator, get_depth_estimator
 from services.tts import generate_voice_and_track_cost
 from services.reasoning import ObstacleClassifier, get_classifier
 from services.pathfinding import get_pathfinder
+from services.map_analyzer import get_map_analyzer
 
 load_dotenv()
 
@@ -59,8 +60,8 @@ class AnnouncementRequest(BaseModel):
     voice_id: Optional[str] = None
 
 class NavigateRequest(BaseModel):
-    text: str  # User voice command text
-    start_room: str = "0020"  # Default start
+    text: str  # User voice command text  (e.g. "I'm in room 0020, take me to room 0010")
+    start_room: Optional[str] = None  # Optional explicit start room
 
 
 # Global model instances
@@ -70,7 +71,7 @@ depth_estimator: Optional[DepthEstimator] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load ML models on startup."""
+    """Load ML models and analyse floor plan on startup."""
     global detector, depth_estimator
     
     print("="*50)
@@ -87,6 +88,22 @@ async def lifespan(app: FastAPI):
         print(f"⚠️  Depth model failed to load: {e}")
         print("   Distance estimation will be disabled.")
         depth_estimator = None
+    
+    # ── Analyse floor plan and build navigation graph ──
+    svg_path = os.path.join("static", "floor_plans", "basement.svg")
+    if os.path.exists(svg_path):
+        try:
+            analyzer = get_map_analyzer()
+            analysis = await analyzer.get_or_create_analysis(svg_path)
+            pathfinder = get_pathfinder()
+            pathfinder.load_from_analysis(analysis)
+            rooms = pathfinder.get_available_rooms()
+            print(f"🗺️  Known rooms: {', '.join(rooms)}")
+        except Exception as e:
+            print(f"⚠️  Map analysis failed: {e}")
+            print("   Navigation will be limited.")
+    else:
+        print(f"⚠️  Floor plan not found at {svg_path}")
     
     print("\n✅ Server ready!")
     print("="*50)
@@ -218,32 +235,91 @@ async def announce_surroundings(request: AnnouncementRequest):
 @app.post("/navigate")
 async def navigate(request: NavigateRequest):
     """
-    Parse navigation intent and return path.
+    Parse navigation intent (start + destination) and return path.
+    User can say: 'I am in room 0020, take me to room 0010'
     """
     classifier = get_classifier()
     intent = await classifier.get_navigation_intent(request.text)
-    
+
     destination = intent.get("destination")
+    start_room = request.start_room or intent.get("start_room")
+
     if not destination:
         return JSONResponse({
             "error": "Could not identify destination room.",
             "intent": intent
         }, status_code=400)
-    
+
+    if not start_room:
+        return JSONResponse({
+            "error": "Please tell me which room you are currently in.",
+            "intent": intent
+        }, status_code=400)
+
     pathfinder = get_pathfinder()
-    path = pathfinder.find_path(request.start_room, destination)
-    
+
+    # Check rooms are known
+    available = pathfinder.get_available_rooms()
+    if available:
+        if pathfinder._resolve(start_room) is None:
+            return JSONResponse({
+                "error": f"Unknown start room '{start_room}'. Available: {', '.join(available)}",
+                "available_rooms": available,
+            }, status_code=404)
+        if pathfinder._resolve(destination) is None:
+            return JSONResponse({
+                "error": f"Unknown destination room '{destination}'. Available: {', '.join(available)}",
+                "available_rooms": available,
+            }, status_code=404)
+
+    path = pathfinder.find_path(start_room, destination)
+
     if not path:
         return JSONResponse({
-            "error": f"Could not find a path to room {destination}.",
-            "destination": destination
+            "error": f"Could not find a path from room {start_room} to room {destination}.",
+            "destination": destination,
+            "start_room": start_room,
         }, status_code=404)
-    
+
     return {
+        "start_room": start_room,
         "destination": destination,
         "path": path,
-        "instruction": f"Heading to room {destination}. I will tell you when to turn and when to watch for obstacles. Start walking forward and tap Announce anytime to hear what is in front of you."
+        "instruction": (
+            f"Heading from room {start_room} to room {destination}. "
+            f"I will tell you when to turn and when to watch for obstacles. "
+            f"Start walking forward and tap Announce anytime to hear what is in front of you."
+        ),
     }
+
+
+@app.get("/rooms")
+async def list_rooms():
+    """Return all known rooms from the map analysis."""
+    pathfinder = get_pathfinder()
+    rooms = pathfinder.get_available_rooms()
+    return {"rooms": rooms}
+
+
+@app.post("/reanalyze-map")
+async def reanalyze_map():
+    """Force re-analysis of the floor plan (admin/debug endpoint)."""
+    svg_path = os.path.join("static", "floor_plans", "basement.svg")
+    if not os.path.exists(svg_path):
+        raise HTTPException(status_code=404, detail="Floor plan SVG not found")
+    try:
+        analyzer = get_map_analyzer()
+        analysis = await analyzer.get_or_create_analysis(svg_path, force=True)
+        pathfinder = get_pathfinder()
+        pathfinder.load_from_analysis(analysis)
+        return {
+            "status": "ok",
+            "rooms": pathfinder.get_available_rooms(),
+            "hallway_nodes": len(analysis.get("hallway_nodes", [])),
+            "connections": len(analysis.get("connections", [])),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/analyze-and-announce")

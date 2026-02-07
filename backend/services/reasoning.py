@@ -259,38 +259,64 @@ class ObstacleClassifier:
 
     async def get_navigation_intent(self, user_text: str) -> Dict[str, Any]:
         """
-        Use Gemini to parse user navigation intent with Regex fallback.
-        Example: "I want to go to room 0010" -> {"destination": "0010"}
-        """
-        # 1. Regex Fallback (Fast & Reliable for room numbers/labels)
-        import re
-        # Look for "room XXXX" or just "XXXX" where X is a digit
-        # Matches "room 0010", "0010", "room ten" (if digit provided)
-        room_match = re.search(r'room\s*(\w+)', user_text.lower())
-        if room_match:
-            dest = room_match.group(1)
-            # Basic validation: ensure it's either room_XXXX format or just XXXX
-            if dest.isdigit() or dest.startswith('00'):
-                return {"destination": dest}
-        
-        # General digit search (e.g., "go to 0010")
-        digits = re.findall(r'\b\d{4}\b', user_text) # Look for 4-digit room numbers
-        if digits:
-            return {"destination": digits[0]}
+        Parse user navigation intent to extract start_room AND destination.
 
-        # 2. Gemini LLM Parsing
+        Examples:
+          "I am in room 0020, take me to room 0010"
+            → {"start_room": "0020", "destination": "0010"}
+          "Go to room 0010"
+            → {"start_room": null, "destination": "0010"}
+        """
+        import re
+
+        # ── 1. Fast regex parsing ──
+        text_lower = user_text.lower()
+
+        # Try to find "in room XXXX" or "from room XXXX" → start_room
+        start_match = re.search(
+            r'(?:in|from|at|currently\s+in)\s+room\s*(\w+)', text_lower
+        )
+        start_room = start_match.group(1) if start_match else None
+
+        # Try to find "to room XXXX" or "go to XXXX" → destination
+        dest_match = re.search(
+            r'(?:to|reach|find|go\s+to)\s+room\s*(\w+)', text_lower
+        )
+        destination = dest_match.group(1) if dest_match else None
+
+        # Fallback: look for all 4-digit numbers
+        all_digits = re.findall(r'\b\d{3,4}\b', user_text)
+        if not destination and len(all_digits) >= 1:
+            # If we found a start_room via regex, destination is the other number
+            if start_room and start_room in all_digits:
+                remaining = [d for d in all_digits if d != start_room]
+                destination = remaining[0] if remaining else None
+            else:
+                destination = all_digits[-1]  # last number is likely the destination
+        if not start_room and len(all_digits) >= 2:
+            start_room = all_digits[0]
+
+        # If regex found both, return immediately (fast path)
+        if destination:
+            return {"start_room": start_room, "destination": destination}
+
+        # ── 2. Gemini LLM parsing (handles natural language) ──
         if not self.client:
-            return {"destination": None, "error": "Gemini not available"}
+            return {"start_room": start_room, "destination": None,
+                    "error": "Could not determine destination"}
 
         prompt = f"""
-        You are an indoor navigation assistant.
-        A user says: "{user_text}"
-        
-        Extract the destination room number or name.
-        Return ONLY a JSON object with a "destination" key.
-        If no destination is found, return {{"destination": null}}.
-        """
-        
+You are an indoor navigation assistant.
+A user says: "{user_text}"
+
+Extract TWO things:
+1. "start_room" — the room the user is currently in (null if not mentioned)
+2. "destination" — the room the user wants to go to (null if not mentioned)
+
+Return ONLY a JSON object: {{"start_room": "XXXX", "destination": "XXXX"}}
+Room numbers are typically 3-4 digit strings like "0020" or "0010".
+"""
+
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -301,19 +327,22 @@ class ObstacleClassifier:
                 timeout=GEMINI_TIMEOUT_S,
             )
             text = response.text.strip()
-            # Clean up potential markdown formatting
             if "```" in text:
                 text = text.split("```")[1].replace("json", "").strip()
-            
+
             import json
-            return json.loads(text)
+            parsed = json.loads(text)
+            # Merge with regex results (regex is more reliable for digits)
+            return {
+                "start_room": start_room or parsed.get("start_room"),
+                "destination": destination or parsed.get("destination"),
+            }
         except Exception as e:
-            print(f"⚠️ Intent parsing failed (Rate Limit or Network): {e}")
-            # Final fallback: if Gemini fails, try any digit sequence in text
-            any_digits = re.search(r'(\d+)', user_text)
-            if any_digits:
-                return {"destination": any_digits.group(1)}
-            return {"destination": None}
+            print(f"⚠️ Intent parsing failed: {e}")
+            return {
+                "start_room": start_room,
+                "destination": destination,
+            }
 
     async def reason_with_gemini(self, detections: List[Dict[str, Any]], image_data: Any = None, navigation_context: str = "") -> str:
         """

@@ -1,88 +1,167 @@
+"""
+Dynamic pathfinding — builds a navigation graph from the Gemini-powered
+map analysis instead of hardcoded coordinates.
+
+The graph nodes include room door positions and hallway waypoints so
+that every computed path follows indoor corridors and never crosses walls.
+"""
 
 import math
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
+
 
 class PathFinder:
+    """
+    Shortest-path finder over a navigation graph produced by MapAnalyzer.
+    """
+
     def __init__(self):
-        # Define the nodes (x, y coordinates in the SVG viewBox 0 0 1224 792)
-        self.nodes = {
-            "room_0020": (420, 190),  # User's start position
-            "room_0010": (1020, 600), # Destination
-            "h1": (420, 400),        # Hallway junction 1
-            "h2": (700, 400),        # Hallway junction 2
-            "h3": (1020, 400),       # Hallway junction 3
-            "exit": (1100, 100),     # Emergency exit
-        }
-        
-        # Define the edges (connections between nodes)
-        self.edges = [
-            ("room_0020", "h1"),
-            ("h1", "h2"),
-            ("h2", "h3"),
-            ("h3", "room_0010"),
-            ("h3", "exit"),
-        ]
-        
-        self.graph = self._build_graph()
+        # node_id → (x, y)
+        self.nodes: Dict[str, Tuple[float, float]] = {}
+        # room_label → node_id   (e.g. "0020" → "room_0020")
+        self.room_lookup: Dict[str, str] = {}
+        # room_id → {"door_x", "door_y"}
+        self.room_doors: Dict[str, Tuple[float, float]] = {}
+        # adjacency list  node_id → {neighbour_id: distance}
+        self.graph: Dict[str, Dict[str, float]] = {}
+        self._loaded = False
 
-    def _build_graph(self) -> Dict[str, Dict[str, float]]:
-        graph = {}
-        for node in self.nodes:
-            graph[node] = {}
-        
-        for u, v in self.edges:
-            dist = self._calculate_distance(self.nodes[u], self.nodes[v])
-            graph[u][v] = dist
-            graph[v][u] = dist
-            
-        return graph
+    # ────────────────── Load from analysis ──────────────────
 
-    def _calculate_distance(self, p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
-        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-
-    def find_path(self, start_label: str, end_label: str) -> Optional[List[Dict[str, float]]]:
+    def load_from_analysis(self, analysis: Dict[str, Any]) -> None:
         """
-        Find shortest path using Dijkstra's algorithm.
-        Returns a list of coordinates.
+        Populate the graph from a map analysis dict
+        (as returned by MapAnalyzer).
         """
-        # Map human-friendly labels to node keys
-        start_node = f"room_{start_label}" if start_label.isdigit() else start_label
-        end_node = f"room_{end_label}" if end_label.isdigit() else end_label
-        
-        if start_node not in self.nodes or end_node not in self.nodes:
+        self.nodes.clear()
+        self.room_lookup.clear()
+        self.room_doors.clear()
+        self.graph.clear()
+
+        # 1. Register rooms — the walkable entry point is the *door*
+        for room in analysis.get("rooms", []):
+            rid = room["id"]                        # "room_0020"
+            label = room.get("label", rid.replace("room_", ""))
+            door_x = room.get("door_x", room["center_x"])
+            door_y = room.get("door_y", room["center_y"])
+
+            # The node we route to/from is the door position
+            self.nodes[rid] = (door_x, door_y)
+            self.room_doors[rid] = (door_x, door_y)
+            self.room_lookup[label] = rid
+            self.graph[rid] = {}
+
+        # 2. Register hallway waypoints
+        for hw in analysis.get("hallway_nodes", []):
+            hid = hw["id"]
+            self.nodes[hid] = (hw["x"], hw["y"])
+            self.graph[hid] = {}
+
+        # 3. Build edges from declared connections
+        for conn in analysis.get("connections", []):
+            u = conn["from"]
+            v = conn["to"]
+            if u in self.nodes and v in self.nodes:
+                dist = self._dist(self.nodes[u], self.nodes[v])
+                self.graph.setdefault(u, {})[v] = dist
+                self.graph.setdefault(v, {})[u] = dist
+
+        self._loaded = True
+        n_rooms = len(self.room_lookup)
+        n_halls = len(analysis.get("hallway_nodes", []))
+        n_edges = len(analysis.get("connections", []))
+        print(f"✅ Navigation graph: {n_rooms} rooms, {n_halls} hallway nodes, {n_edges} connections")
+
+    # ────────────────── Pathfinding ──────────────────
+
+    def find_path(
+        self, start_label: str, end_label: str
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Dijkstra shortest path between two room labels (e.g. "0020" → "0010").
+        Returns a list of {x, y, label} waypoints or None.
+        """
+        start_node = self._resolve(start_label)
+        end_node = self._resolve(end_label)
+
+        if start_node is None:
+            print(f"⚠️  Unknown start room: {start_label}")
+            return None
+        if end_node is None:
+            print(f"⚠️  Unknown destination room: {end_label}")
+            return None
+        if start_node == end_node:
+            x, y = self.nodes[start_node]
+            return [{"x": x, "y": y, "label": start_node}]
+
+        # Dijkstra
+        INF = float("inf")
+        dist = {n: INF for n in self.nodes}
+        prev: Dict[str, Optional[str]] = {n: None for n in self.nodes}
+        dist[start_node] = 0
+        unvisited = set(self.nodes.keys())
+
+        while unvisited:
+            current = min(unvisited, key=lambda n: dist[n])
+            if dist[current] == INF:
+                break
+            if current == end_node:
+                break
+            unvisited.remove(current)
+
+            for neighbour, weight in self.graph.get(current, {}).items():
+                if neighbour in unvisited:
+                    alt = dist[current] + weight
+                    if alt < dist[neighbour]:
+                        dist[neighbour] = alt
+                        prev[neighbour] = current
+
+        # Reconstruct
+        if dist[end_node] == INF:
             return None
 
-        # Dijkstra implementation
-        distances = {node: float('inf') for node in self.nodes}
-        distances[start_node] = 0
-        previous_nodes = {node: None for node in self.nodes}
-        nodes_to_visit = list(self.nodes.keys())
+        path_ids: List[str] = []
+        cur: Optional[str] = end_node
+        while cur is not None:
+            path_ids.append(cur)
+            cur = prev[cur]
+        path_ids.reverse()
 
-        while nodes_to_visit:
-            current_node = min(nodes_to_visit, key=lambda node: distances[node])
-            nodes_to_visit.remove(current_node)
+        return [
+            {"x": self.nodes[nid][0], "y": self.nodes[nid][1], "label": nid}
+            for nid in path_ids
+        ]
 
-            if distances[current_node] == float('inf'):
-                break
+    # ────────────────── Room listing ──────────────────
 
-            for neighbor, weight in self.graph[current_node].items():
-                new_distance = distances[current_node] + weight
-                if new_distance < distances[neighbor]:
-                    distances[neighbor] = new_distance
-                    previous_nodes[neighbor] = current_node
+    def get_available_rooms(self) -> List[str]:
+        """Return sorted list of known room labels."""
+        return sorted(self.room_lookup.keys())
 
-        # Reconstruct path
-        path = []
-        current = end_node
-        while current is not None:
-            x, y = self.nodes[current]
-            path.append({"x": x, "y": y, "label": current})
-            current = previous_nodes[current]
-            
-        return path[::-1] # Reverse to get start -> end
+    # ────────────────── Internals ──────────────────
 
-_finder = None
-def get_pathfinder():
+    def _resolve(self, label: str) -> Optional[str]:
+        """Map a human label (e.g. '0020') to a node id."""
+        # Direct node id
+        if label in self.nodes:
+            return label
+        # room_XXXX format
+        prefixed = f"room_{label}"
+        if prefixed in self.nodes:
+            return prefixed
+        # Lookup table
+        return self.room_lookup.get(label)
+
+    @staticmethod
+    def _dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+
+# ── Singleton ──
+_finder: Optional[PathFinder] = None
+
+
+def get_pathfinder() -> PathFinder:
     global _finder
     if _finder is None:
         _finder = PathFinder()
