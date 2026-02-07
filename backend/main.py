@@ -260,23 +260,31 @@ async def navigate(request: NavigateRequest):
 
     # Check rooms are known
     available = pathfinder.get_available_rooms()
-    if available:
-        if pathfinder._resolve(start_room) is None:
-            return JSONResponse({
-                "error": f"Unknown start room '{start_room}'. Available: {', '.join(available)}",
-                "available_rooms": available,
-            }, status_code=404)
-        if pathfinder._resolve(destination) is None:
-            return JSONResponse({
-                "error": f"Unknown destination room '{destination}'. Available: {', '.join(available)}",
-                "available_rooms": available,
-            }, status_code=404)
+    if not available:
+        # No rooms loaded at all — map analysis may have failed
+        return JSONResponse({
+            "error": "No rooms have been loaded. The floor plan may not have been analysed yet. Try the /reanalyze-map endpoint.",
+        }, status_code=503)
+
+    resolved_start = pathfinder._resolve(start_room)
+    if resolved_start is None:
+        return JSONResponse({
+            "error": f"Unknown start room '{start_room}'. Available: {', '.join(available)}",
+            "available_rooms": available,
+        }, status_code=404)
+
+    resolved_dest = pathfinder._resolve(destination)
+    if resolved_dest is None:
+        return JSONResponse({
+            "error": f"Unknown destination room '{destination}'. Available: {', '.join(available)}",
+            "available_rooms": available,
+        }, status_code=404)
 
     path = pathfinder.find_path(start_room, destination)
 
     if not path:
         return JSONResponse({
-            "error": f"Could not find a path from room {start_room} to room {destination}.",
+            "error": f"Could not find a path from room {start_room} to room {destination}. The rooms exist but are not connected in the navigation graph.",
             "destination": destination,
             "start_room": start_room,
         }, status_code=404)

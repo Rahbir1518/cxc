@@ -49,6 +49,12 @@ class PathFinder:
             self.nodes[rid] = (door_x, door_y)
             self.room_doors[rid] = (door_x, door_y)
             self.room_lookup[label] = rid
+            # Also register normalised variants so "20" and "0020" both work
+            if label.isdigit():
+                stripped = label.lstrip("0") or "0"
+                padded = label.zfill(4)
+                for variant in (stripped, padded, label):
+                    self.room_lookup.setdefault(variant, rid)
             self.graph[rid] = {}
 
         # 2. Register hallway waypoints
@@ -141,16 +147,43 @@ class PathFinder:
     # ────────────────── Internals ──────────────────
 
     def _resolve(self, label: str) -> Optional[str]:
-        """Map a human label (e.g. '0020') to a node id."""
-        # Direct node id
+        """Map a human label (e.g. '0020') to a node id.
+
+        Tries several normalised forms so that '20', '0020', '020' all
+        resolve to the same room regardless of how Gemini labelled it.
+        """
+        label = label.strip()
+
+        # 1. Direct node id
         if label in self.nodes:
             return label
-        # room_XXXX format
+
+        # 2. room_XXXX format
         prefixed = f"room_{label}"
         if prefixed in self.nodes:
             return prefixed
-        # Lookup table
-        return self.room_lookup.get(label)
+
+        # 3. Exact lookup
+        if label in self.room_lookup:
+            return self.room_lookup[label]
+
+        # 4. Normalised lookup — strip leading zeros then compare
+        stripped = label.lstrip("0") or "0"
+        for stored_label, node_id in self.room_lookup.items():
+            if (stored_label.lstrip("0") or "0") == stripped:
+                return node_id
+
+        # 5. Try zero-padded variants (common 4-digit room numbers)
+        if label.isdigit():
+            for width in (4, 3, 2):
+                padded = label.zfill(width)
+                if padded in self.room_lookup:
+                    return self.room_lookup[padded]
+                prefixed_padded = f"room_{padded}"
+                if prefixed_padded in self.nodes:
+                    return prefixed_padded
+
+        return None
 
     @staticmethod
     def _dist(a: Tuple[float, float], b: Tuple[float, float]) -> float:
