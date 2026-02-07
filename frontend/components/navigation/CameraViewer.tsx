@@ -177,19 +177,26 @@ function CameraViewerInner({
   return (
     <div
       className={`relative overflow-hidden rounded-xl ${className}`}
-      style={{ background: "var(--color-bg-card)" }}
+      style={{ background: "var(--color-bg-primary)", display: "flex", flexDirection: "column" }}
     >
       {/* Display processed frame or waiting state */}
       {processedFrame ? (
         <img
           src={processedFrame}
           alt="Live camera feed from phone"
-          className="h-full w-full object-cover"
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            position: "absolute",
+            inset: 0,
+            background: "var(--color-bg-primary)",
+          }}
         />
       ) : (
         <div
           className="flex h-full min-h-[200px] flex-col items-center justify-center gap-3"
-          style={{ color: "var(--color-text-muted)" }}
+          style={{ color: "var(--color-text-muted)", flex: 1 }}
         >
           <Camera className="h-12 w-12" style={{ opacity: 0.3 }} />
           <p style={{ fontSize: "0.875rem" }}>
