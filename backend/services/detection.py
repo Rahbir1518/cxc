@@ -119,7 +119,10 @@ class ObjectDetector:
                     center=(cx, cy),
                 ))
         
-        return detections
+        # Optimization: Sort by confidence and limit to top 5
+        # This keeps the video feed smoother even with many objects
+        detections.sort(key=lambda x: x.confidence, reverse=True)
+        return detections[:5]
     
     def detect_from_bytes(self, image_bytes: bytes) -> List[DetectedObject]:
         """Detect objects from raw image bytes (e.g., from HTTP request)."""

@@ -370,8 +370,8 @@ async def websocket_video(websocket: WebSocket):
             else:
                 annotated = frame
             
-            # Encode annotated frame
-            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            # Encode annotated frame with lower quality for speed
+            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 50])
             frame_base64 = base64.b64encode(buffer).decode('utf-8')
             
             # Generate navigation instruction
@@ -380,7 +380,7 @@ async def websocket_video(websocket: WebSocket):
             instruction = classifier.generate_navigation_instruction(detection_dicts)
             classified = classifier.classify_all(detection_dicts)
             
-            # Send response (objects must be JSON-serializable, no numpy float32)
+            # Send response (objects must be JSON-serializable)
             await websocket.send_json({
                 "objects": _make_json_serializable(classified),
                 "frame_base64": frame_base64,

@@ -25,7 +25,7 @@ def get_elevenlabs_client():
 def generate_voice_and_track_cost(
     text: str,
     voice_id: str = "JBFqnCBsd6RMkjVDRZzb",  # Default: calm, clear voice
-    model_id: str = "eleven_multilingual_v2",
+    model_id: str = "eleven_flash_v2_5",  # Use Flash v2.5 for low latency
 ) -> bytes:
     """
     Generate speech from text and track character costs.
@@ -38,13 +38,16 @@ def generate_voice_and_track_cost(
     Returns:
         Audio data as bytes (MP3 format)
     """
+    client = get_elevenlabs_client()
     try:
-        # Use simpler generate method which returns a generator of bytes
-        response = client.generate(
+        # ElevenLabs SDK v2 uses text_to_speech.convert() instead of generate()
+        response = client.text_to_speech.convert(
             text=text,
-            voice=voice_id,
-            model=model_id
+            voice_id=voice_id,
+            model_id=model_id,
+            output_format="mp3_44100_128",
         )
+        # Response is a generator of bytes chunks
         return b"".join(response)
     except Exception as e:
         print(f"✗ TTS Generation Error: {e}")

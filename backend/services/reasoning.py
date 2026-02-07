@@ -4,18 +4,21 @@ Uses DISTANCE only to determine obstacles. No hardcoded object lists.
 """
 
 import os
+import base64
+import io
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Try to import Gemini
+# Try to import new google-genai SDK (preferred over deprecated google.generativeai)
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
-    print("⚠️ google-generativeai not installed. Using rule-based reasoning only.")
+    print("⚠️ google-genai not installed. Run: pip install google-genai")
 
 
 class ObstacleClassifier:
@@ -29,17 +32,23 @@ class ObstacleClassifier:
     CAUTION_DISTANCE = 3.5   # Be aware (increased to be more sensitive)
     
     def __init__(self):
-        self.model = None
+        self.client = None
+        self.model_name = "gemini-2.0-flash"  # Use latest model
         
         if GEMINI_AVAILABLE:
             api_key = os.getenv("GOOGLE_GEMINI_API_KEY")
             if api_key and api_key != "your_gemini_api_key_here":
                 try:
-                    genai.configure(api_key=api_key)
-                    self.model = genai.GenerativeModel('gemini-1.5-flash')
-                    print("✓ Gemini reasoning enabled")
+                    self.client = genai.Client(api_key=api_key)
+                    # Test the model
+                    test_response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents="test"
+                    )
+                    print(f"✓ Gemini reasoning enabled ({self.model_name})")
                 except Exception as e:
                     print(f"⚠️ Gemini init failed: {e}")
+                    self.client = None
             else:
                 print("⚠️ GOOGLE_GEMINI_API_KEY not configured - using rule-based reasoning")
     
@@ -173,7 +182,7 @@ class ObstacleClassifier:
             return {"destination": digits[0]}
 
         # 2. Gemini LLM Parsing
-        if not self.model:
+        if not self.client:
             return {"destination": None, "error": "Gemini not available"}
 
         prompt = f"""
@@ -186,7 +195,10 @@ class ObstacleClassifier:
         """
         
         try:
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
             text = response.text.strip()
             # Clean up potential markdown formatting
             if "```" in text:
@@ -207,7 +219,7 @@ class ObstacleClassifier:
         Use Gemini's MULTIMODAL capabilities (Vision + Text).
         Sends the actual image to the model for "human-like" scene understanding.
         """
-        if not self.model:
+        if not self.client:
             return self.generate_navigation_instruction(detections)
             
         # If we have an image, use visual reasoning (much smarter)
@@ -241,8 +253,21 @@ RULES:
 - Do not mention the map, the screen, or anything visual. Only verbal directions.
 """
             try:
-                content = [prompt, image_data]
-                response = self.model.generate_content(content)
+                # Convert PIL Image to base64 for the new google-genai API
+                img_buffer = io.BytesIO()
+                image_data.save(img_buffer, format='JPEG')
+                img_bytes = img_buffer.getvalue()
+                
+                # Create image part using the new types format
+                image_part = types.Part.from_bytes(
+                    data=img_bytes,
+                    mime_type="image/jpeg"
+                )
+                
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=[prompt, image_part]
+                )
                 return response.text.strip()
             except Exception as e:
                 print(f"⚠️ Gemini Visual reasoning failed: {e}")
@@ -268,7 +293,10 @@ RULES:
         prompt_text = f"You are speaking to a blind person. Goal: {navigation_context}\nScene:\n{scene_text}\n\nReply with one short verbal command: say 'Take X steps left' or 'Take X steps right' if blocked, or 'Path clear, walk forward' if clear. Max 15 words."
 
         try:
-            response = self.model.generate_content(prompt_text)
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt_text
+            )
             return response.text.strip()
         except Exception as e:
             print(f"⚠️ Gemini Text reasoning failed: {e}")
