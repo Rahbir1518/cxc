@@ -1,1 +1,4 @@
-console.log("This is useCameraStream.ts");
+export function useCameraStream() {
+  // Placeholder hook
+  return { isStreaming: false, fps: 0 };
+}
