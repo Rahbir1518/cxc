@@ -48,6 +48,18 @@ const CameraStream = dynamic(
   }
 );
 
+const CameraViewer = dynamic(
+  () => import("@/components/navigation/CameraViewer").then((m) => m.CameraViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full bg-(--color-bg-card) rounded-xl" style={{ animation: "pulse-soft 2s infinite" }}>
+        <Video className="h-12 w-12" style={{ color: "var(--color-text-muted)" }} />
+      </div>
+    ),
+  }
+);
+
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 interface DetectedObject {
@@ -83,6 +95,7 @@ export default function DashboardPage() {
 
   // Camera
   const [cameraActive, setCameraActive] = useState(false);
+  const [viewerMode, setViewerMode] = useState(true); // true = viewer (phone feed), false = local webcam
 
   // Navigation
   const [navPath, setNavPath] = useState<PathNode[]>([]);
@@ -368,7 +381,48 @@ export default function DashboardPage() {
               minHeight: 400,
             }}
           >
-            {cameraActive ? (
+            {/* Mode tabs */}
+            <div
+              className="absolute top-3 left-3 flex gap-1 z-20"
+              style={{
+                background: "rgba(10,14,12,0.85)",
+                backdropFilter: "blur(8px)",
+                borderRadius: "var(--radius-md)",
+                padding: "3px",
+                border: "1px solid var(--color-border)",
+              }}
+            >
+              <button
+                onClick={() => { setViewerMode(true); setCameraActive(true); }}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+                style={{
+                  background: viewerMode ? "rgba(191,200,195,0.15)" : "transparent",
+                  color: viewerMode ? "var(--color-primary-400)" : "var(--color-text-muted)",
+                }}
+              >
+                📱 Phone Feed
+              </button>
+              <button
+                onClick={() => { setViewerMode(false); setCameraActive(true); }}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+                style={{
+                  background: !viewerMode ? "rgba(191,200,195,0.15)" : "transparent",
+                  color: !viewerMode ? "var(--color-primary-400)" : "var(--color-text-muted)",
+                }}
+              >
+                🖥️ Local Webcam
+              </button>
+            </div>
+
+            {cameraActive && viewerMode ? (
+              <CameraViewer
+                serverUrl={BACKEND_URL}
+                autoConnect={true}
+                className="h-full w-full"
+                onDetections={handleDetections}
+                onInstruction={handleInstruction}
+              />
+            ) : cameraActive && !viewerMode ? (
               <CameraStream
                 serverUrl={BACKEND_URL}
                 autoStart={true}
@@ -380,25 +434,43 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center justify-center h-full gap-4" style={{ color: "var(--color-text-muted)" }}>
                 <Video className="h-16 w-16" style={{ opacity: 0.3 }} />
                 <p style={{ fontSize: "0.9375rem" }}>Camera feed will appear here</p>
+                <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)", maxWidth: 320, textAlign: "center" }}>
+                  Open <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-primary-400)" }}>/static/camera_test.html</span> on your phone to stream, or use the local webcam
+                </p>
                 {isConnected && (
-                  <button
-                    onClick={() => setCameraActive(true)}
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl font-semibold"
-                    style={{
-                      background: "var(--gradient-smoke)",
-                      color: "var(--color-bg-primary)",
-                      fontSize: "0.875rem",
-                      transition: "all var(--transition-fast)",
-                    }}
-                  >
-                    <Video className="h-4 w-4" /> Start Camera
-                  </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setViewerMode(true); setCameraActive(true); }}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold"
+                      style={{
+                        background: "var(--gradient-smoke)",
+                        color: "var(--color-bg-primary)",
+                        fontSize: "0.875rem",
+                        transition: "all var(--transition-fast)",
+                      }}
+                    >
+                      <Video className="h-4 w-4" /> Phone Feed
+                    </button>
+                    <button
+                      onClick={() => { setViewerMode(false); setCameraActive(true); }}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold"
+                      style={{
+                        background: "rgba(191,200,195,0.1)",
+                        color: "var(--color-primary-400)",
+                        border: "1px solid var(--color-border)",
+                        fontSize: "0.875rem",
+                        transition: "all var(--transition-fast)",
+                      }}
+                    >
+                      <Video className="h-4 w-4" /> Local Webcam
+                    </button>
+                  </div>
                 )}
               </div>
             )}
 
             {/* Overlay controls */}
-            {cameraActive && (
+            {cameraActive && !viewerMode && (
               <div className="absolute top-3 right-3 flex gap-2" style={{ zIndex: 20 }}>
                 <button
                   onClick={announceScene}
@@ -502,15 +574,15 @@ export default function DashboardPage() {
                     className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
                     style={{ background: "rgba(252,165,165,0.15)", color: "#fca5a5", border: "1px solid rgba(252,165,165,0.2)" }}
                   >
-                    <Square className="h-4 w-4" /> Stop Camera
+                    <Square className="h-4 w-4" /> Stop Feed
                   </button>
                 ) : (
                   <button
-                    onClick={() => setCameraActive(true)}
+                    onClick={() => { setViewerMode(true); setCameraActive(true); }}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
                     style={{ background: "var(--gradient-smoke)", color: "var(--color-bg-primary)" }}
                   >
-                    <Video className="h-4 w-4" /> Start Camera
+                    <Video className="h-4 w-4" /> Start Feed
                   </button>
                 )}
 
