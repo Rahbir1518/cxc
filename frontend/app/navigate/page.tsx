@@ -73,7 +73,8 @@ export default function NavigatePage() {
   // ── Voice state ──
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
 
   // ── Manual input ──
   const [manualFrom, setManualFrom] = useState("");
@@ -153,7 +154,7 @@ export default function NavigatePage() {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [parseNavCommand]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stopListening = useCallback(() => {
     recognitionRef.current?.stop();

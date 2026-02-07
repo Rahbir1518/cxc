@@ -1,1 +1,5 @@
-console.log("This is IndoorMap.tsx");
+"use client";
+
+export function IndoorMap() {
+  return <div>IndoorMap placeholder</div>;
+}

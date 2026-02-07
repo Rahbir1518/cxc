@@ -19,11 +19,12 @@ export function VoiceListener({
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recognitionRef = useRef<any>(null);
 
   const startListening = useCallback(() => {
     const SpeechRecognition =
-      window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     
     if (!SpeechRecognition) {
       const err = "Speech recognition not supported";
@@ -42,13 +43,13 @@ export function VoiceListener({
       setError(null);
     };
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: any) => {
       const result = event.results[event.results.length - 1][0].transcript;
       setTranscript(result);
       onResult?.(result);
     };
 
-    recognition.onerror = (event) => {
+    recognition.onerror = (event: any) => {
       const err = `Voice error: ${event.error}`;
       setError(err);
       onError?.(err);
