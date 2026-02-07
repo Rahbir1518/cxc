@@ -58,7 +58,6 @@
             border-radius: 12px;
             overflow: hidden;
             width: 100%;
-            height: 220px;
             position: relative;
             display: none;
             border: 2px solid #4ecca3;
@@ -68,8 +67,7 @@
         
         #mapImg {
             width: 100%;
-            height: 100%;
-            object-fit: contain;
+            display: block;
         }
         
         #routeCanvas {
@@ -91,6 +89,77 @@
             border-radius: 8px;
             font-size: 0.85rem;
             color: #4ecca3;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .nav-overlay .nav-icon {
+            font-size: 1rem;
+        }
+        
+        .nav-progress {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.85);
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            color: #a0a0c0;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 4px;
+            background: #2a2a4e;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #2ecc71, #4ecca3);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        .legend {
+            position: absolute;
+            bottom: 36px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.65rem;
+            color: #ccc;
+            display: flex;
+            gap: 8px;
+            z-index: 5;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .legend-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .legend-line {
+            width: 16px;
+            height: 3px;
+            border-radius: 2px;
         }
         
         .video-container {
@@ -148,11 +217,22 @@
         #connectBtn { background: #4ecca3; color: #1a1a2e; }
         #startBtn { background: linear-gradient(135deg, #4ecca3, #38a3a5); color: #1a1a2e; }
         #stopBtn { background: #e74c3c; color: white; }
+        #announceBtn { background: linear-gradient(135deg, #3498db, #2980b9); color: white; }
+        #announceBtn:not(:disabled):hover { box-shadow: 0 0 12px rgba(52,152,219,0.5); }
         #voiceNavBtn {
             background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
         }
         #voiceNavBtn.active-nav { box-shadow: 0 0 16px rgba(240, 147, 251, 0.6); }
+
+        /* Speaking indicator on announce button */
+        #announceBtn.speaking {
+            animation: pulse-speak 1s ease-in-out infinite;
+        }
+        @keyframes pulse-speak {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(52,152,219,0.4); }
+            50% { box-shadow: 0 0 20px 4px rgba(52,152,219,0.6); }
+        }
         
         .manual-row {
             display: none;
@@ -186,7 +266,7 @@
 </head>
 <body>
     <header>
-        <h1>🧭 Voice Navigation (Room 0020 → destination)</h1>
+        <h1>🧭 Indoor Navigation</h1>
         <div id="status">Enter server address and connect</div>
     </header>
     
@@ -197,12 +277,26 @@
         </div>
         
         <div id="mapContainer">
-            <div class="nav-overlay" id="navInfo">Destination: —</div>
+            <div class="nav-overlay" id="navInfo">
+                <span class="nav-icon">🧭</span>
+                <span id="navInfoText">Ready</span>
+            </div>
             <img id="mapImg" alt="Floor Plan" />
             <canvas id="routeCanvas"></canvas>
+            <div class="legend" id="mapLegend" style="display:none;">
+                <div class="legend-item"><div class="legend-dot" style="background:#10b981;"></div> You</div>
+                <div class="legend-item"><div class="legend-line" style="background:#2ecc71;"></div> Done</div>
+                <div class="legend-item"><div class="legend-line" style="background:#3b82f6; border-style:dashed;"></div> Ahead</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ef4444;"></div> End</div>
+            </div>
+            <div class="nav-progress" id="navProgress" style="display:none;">
+                <span id="progressText">0%</span>
+                <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+                <span id="etaText"></span>
+            </div>
         </div>
         
-        <p class="voice-prompt" style="margin-bottom:0;">Camera — you’ll hear what’s in the way when you tap Announce.</p>
+        <p class="voice-prompt" style="margin-bottom:0;">Camera — you'll hear what's in the way when you tap <strong>What's Ahead</strong>.</p>
         <div id="videoContainer" class="video-container">
             <video id="videoElement" autoplay playsinline></video>
             <img id="processedFrame" alt="Camera with object boxes when connected">
@@ -215,8 +309,8 @@
         <div class="controls">
             <button id="startBtn" disabled>📷 Start</button>
             <button id="stopBtn" disabled>⏹ Stop</button>
-            <button id="announceBtn" disabled>🔊 Announce</button>
-            <button id="voiceNavBtn" disabled>🎤 Say destination</button>
+            <button id="announceBtn" disabled>🔊 What's Ahead</button>
+            <button id="voiceNavBtn" disabled>🎤 Navigate</button>
         </div>
         
         <div id="manualEntry" class="manual-row">
@@ -231,6 +325,7 @@
     </div>
     
     <script>
+        // ─── DOM REFS ──────────────────────────────────────────────────
         const serverUrlInput = document.getElementById('serverUrl');
         const connectBtn = document.getElementById('connectBtn');
         const statusEl = document.getElementById('status');
@@ -242,15 +337,23 @@
         const mapContainer = document.getElementById('mapContainer');
         const mapImg = document.getElementById('mapImg');
         const routeCanvas = document.getElementById('routeCanvas');
-        const navInfo = document.getElementById('navInfo');
+        const navInfo = document.getElementById('navInfoText');
         const detectionList = document.getElementById('detectionList');
         const voicePrompt = document.getElementById('voicePrompt');
         const manualEntry = document.getElementById('manualEntry');
         const videoContainer = document.getElementById('videoContainer');
         const announceBtn = document.getElementById('announceBtn');
+        const mapLegend = document.getElementById('mapLegend');
+        const navProgress = document.getElementById('navProgress');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const etaText = document.getElementById('etaText');
         
         const START_ROOM = '0020';
+        const SVG_WIDTH = 1224;
+        const SVG_HEIGHT = 792;
         
+        // ─── STATE ─────────────────────────────────────────────────────
         let serverUrl = '';
         let ws = null;
         let stream = null;
@@ -264,17 +367,386 @@
         let navDestination = null;
         let guidanceInterval = null;
         let recognition = null;
-        
+
+        // ─── AUDIO MANAGEMENT (fix overlapping voices) ─────────────────
+        let currentAudio = null;
+        let isSpeakingEL = false;
+        let speakQueue = null; // pending speak promise
+
+        function stopAllAudio() {
+            // Stop ElevenLabs audio
+            if (currentAudio) {
+                try {
+                    currentAudio.pause();
+                    currentAudio.currentTime = 0;
+                    if (currentAudio._blobUrl) URL.revokeObjectURL(currentAudio._blobUrl);
+                } catch(e) {}
+                currentAudio = null;
+            }
+            // Stop browser TTS
+            speechSynthesis.cancel();
+            isSpeakingEL = false;
+            announceBtn.classList.remove('speaking');
+        }
+
+        function speak(text) {
+            if (!text) return;
+            stopAllAudio();
+            lastSpokenAnnouncement = text;
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 0.9;
+            speechSynthesis.speak(u);
+        }
+
+        async function speakWithElevenLabs(text) {
+            if (!text) return;
+
+            // CRITICAL FIX: Stop any currently playing audio first
+            stopAllAudio();
+
+            isSpeakingEL = true;
+            announceBtn.classList.add('speaking');
+
+            try {
+                const res = await fetch(serverUrl + '/announce', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                if (!res.ok) throw new Error(res.status);
+
+                const blob = await res.blob();
+                if (!blob || blob.size === 0) throw new Error('No audio');
+
+                // Check if we were interrupted while waiting for the fetch
+                if (!isSpeakingEL) return;
+
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio._blobUrl = url; // track for cleanup
+
+                return new Promise((resolve) => {
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url);
+                        currentAudio = null;
+                        isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        resolve();
+                    };
+                    audio.onerror = () => {
+                        URL.revokeObjectURL(url);
+                        currentAudio = null;
+                        isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        speak(text);
+                        resolve();
+                    };
+                    currentAudio = audio;
+                    audio.play().catch(() => {
+                        currentAudio = null;
+                        isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        speak(text);
+                        resolve();
+                    });
+                });
+            } catch (e) {
+                console.warn('ElevenLabs fallback to TTS:', e);
+                isSpeakingEL = false;
+                announceBtn.classList.remove('speaking');
+                speak(text);
+            }
+        }
+
+        // ─── LIVE POSITION TRACKING ────────────────────────────────────
+        let userPosition = null;       // {x, y} current interpolated position
+        let targetWaypointIdx = 1;     // next waypoint index
+        let positionProgress = 0;      // 0..1 between waypoints
+        let mapRenderRAF = null;       // animation frame id
+        let navStartTime = null;       // when navigation started
+        const WALK_SPEED = 0.002;      // progress per frame (~1.5m/s simulated)
+
+        function startPositionTracking() {
+            if (!navPath.length) return;
+            userPosition = { x: navPath[0].x, y: navPath[0].y };
+            targetWaypointIdx = Math.min(1, navPath.length - 1);
+            positionProgress = 0;
+            navStartTime = Date.now();
+            mapLegend.style.display = 'flex';
+            navProgress.style.display = 'flex';
+            startMapRenderLoop();
+        }
+
+        function stopPositionTracking() {
+            if (mapRenderRAF) {
+                cancelAnimationFrame(mapRenderRAF);
+                mapRenderRAF = null;
+            }
+            userPosition = null;
+            targetWaypointIdx = 1;
+            positionProgress = 0;
+            mapLegend.style.display = 'none';
+            navProgress.style.display = 'none';
+        }
+
+        function getTotalPathLength() {
+            let total = 0;
+            for (let i = 1; i < navPath.length; i++) {
+                const dx = navPath[i].x - navPath[i-1].x;
+                const dy = navPath[i].y - navPath[i-1].y;
+                total += Math.sqrt(dx*dx + dy*dy);
+            }
+            return total;
+        }
+
+        function getTraversedLength() {
+            let total = 0;
+            for (let i = 1; i < targetWaypointIdx; i++) {
+                const dx = navPath[i].x - navPath[i-1].x;
+                const dy = navPath[i].y - navPath[i-1].y;
+                total += Math.sqrt(dx*dx + dy*dy);
+            }
+            // Add current segment progress
+            if (targetWaypointIdx < navPath.length && targetWaypointIdx > 0) {
+                const dx = navPath[targetWaypointIdx].x - navPath[targetWaypointIdx-1].x;
+                const dy = navPath[targetWaypointIdx].y - navPath[targetWaypointIdx-1].y;
+                total += Math.sqrt(dx*dx + dy*dy) * positionProgress;
+            }
+            return total;
+        }
+
+        function startMapRenderLoop() {
+            if (mapRenderRAF) return;
+
+            function render() {
+                if (!isNavigating) {
+                    mapRenderRAF = null;
+                    return;
+                }
+
+                // Advance simulated position along path
+                if (targetWaypointIdx < navPath.length) {
+                    // Variable speed based on segment length
+                    const from = navPath[targetWaypointIdx - 1];
+                    const to = navPath[targetWaypointIdx];
+                    const segDx = to.x - from.x;
+                    const segDy = to.y - from.y;
+                    const segLen = Math.sqrt(segDx*segDx + segDy*segDy);
+                    // Normalize speed so longer segments take proportionally longer
+                    const speed = Math.max(0.001, 150 / segLen) * 0.016; // ~60fps adjusted
+
+                    positionProgress += speed;
+
+                    if (positionProgress >= 1) {
+                        positionProgress = 0;
+                        userPosition = { x: to.x, y: to.y };
+                        targetWaypointIdx++;
+
+                        if (targetWaypointIdx >= navPath.length) {
+                            // Arrived!
+                            userPosition = { x: navPath[navPath.length - 1].x, y: navPath[navPath.length - 1].y };
+                        }
+                    } else {
+                        userPosition = {
+                            x: from.x + segDx * positionProgress,
+                            y: from.y + segDy * positionProgress,
+                        };
+                    }
+                }
+
+                // Update progress bar
+                const totalLen = getTotalPathLength();
+                const traversedLen = getTraversedLength();
+                const pct = totalLen > 0 ? Math.min(100, (traversedLen / totalLen) * 100) : 0;
+                progressFill.style.width = pct.toFixed(0) + '%';
+                progressText.textContent = pct.toFixed(0) + '%';
+
+                if (targetWaypointIdx >= navPath.length) {
+                    etaText.textContent = 'Arrived!';
+                    progressFill.style.width = '100%';
+                    progressText.textContent = '100%';
+                } else {
+                    const remainPct = 100 - pct;
+                    etaText.textContent = remainPct < 20 ? 'Almost there' : '';
+                }
+
+                drawMapWithPosition();
+                mapRenderRAF = requestAnimationFrame(render);
+            }
+
+            mapRenderRAF = requestAnimationFrame(render);
+        }
+
+        function drawMapWithPosition() {
+            if (!navPath?.length) return;
+
+            const ctx = routeCanvas.getContext('2d');
+
+            // Match canvas pixel size to displayed image size
+            const w = mapImg.clientWidth;
+            const h = mapImg.clientHeight;
+            if (w === 0 || h === 0) return;
+
+            // Set canvas internal resolution (only when changed)
+            if (routeCanvas.width !== w || routeCanvas.height !== h) {
+                routeCanvas.width = w;
+                routeCanvas.height = h;
+            }
+
+            ctx.clearRect(0, 0, w, h);
+
+            const scaleX = w / SVG_WIDTH;
+            const scaleY = h / SVG_HEIGHT;
+
+            const traversedIdx = targetWaypointIdx - 1;
+
+            // ── 1. Draw traversed path (green, solid) ──
+            if (traversedIdx >= 0 && userPosition) {
+                ctx.beginPath();
+                ctx.moveTo(navPath[0].x * scaleX, navPath[0].y * scaleY);
+                for (let i = 1; i <= Math.min(traversedIdx, navPath.length - 1); i++) {
+                    ctx.lineTo(navPath[i].x * scaleX, navPath[i].y * scaleY);
+                }
+                ctx.lineTo(userPosition.x * scaleX, userPosition.y * scaleY);
+                ctx.strokeStyle = '#2ecc71';
+                ctx.lineWidth = 6;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+
+            // ── 2. Draw remaining path (blue, dashed, animated) ──
+            if (targetWaypointIdx < navPath.length) {
+                ctx.beginPath();
+                if (userPosition) {
+                    ctx.moveTo(userPosition.x * scaleX, userPosition.y * scaleY);
+                } else {
+                    ctx.moveTo(navPath[0].x * scaleX, navPath[0].y * scaleY);
+                }
+                for (let i = targetWaypointIdx; i < navPath.length; i++) {
+                    ctx.lineTo(navPath[i].x * scaleX, navPath[i].y * scaleY);
+                }
+                // Animated dash offset
+                const dashOffset = (Date.now() / 50) % 30;
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 5;
+                ctx.setLineDash([14, 8]);
+                ctx.lineDashOffset = -dashOffset;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // ── 3. Draw waypoints ──
+            navPath.forEach((p, i) => {
+                const x = p.x * scaleX;
+                const y = p.y * scaleY;
+                const isEnd = i === navPath.length - 1;
+                const isStart = i === 0;
+                const isReached = i <= traversedIdx;
+
+                // Only draw start and end prominently; middle ones are subtle
+                if (isStart || isEnd) {
+                    ctx.beginPath();
+                    ctx.arc(x, y, isEnd ? 10 : 8, 0, Math.PI * 2);
+                    ctx.fillStyle = isStart ? '#22c55e' : '#ef4444';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2.5;
+                    ctx.stroke();
+
+                    // Label
+                    ctx.font = 'bold 11px sans-serif';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(isStart ? 'S' : 'E', x, y + 1);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = isReached ? '#2ecc71' : '#3b82f6';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+            });
+
+            // ── 4. Draw user position (pulsing beacon) ──
+            if (userPosition) {
+                const ux = userPosition.x * scaleX;
+                const uy = userPosition.y * scaleY;
+                const now = Date.now();
+                const pulse = 1 + Math.sin(now / 250) * 0.35;
+
+                // Outer ripple 1
+                ctx.beginPath();
+                ctx.arc(ux, uy, 22 * pulse, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.12)';
+                ctx.fill();
+
+                // Outer ripple 2
+                ctx.beginPath();
+                ctx.arc(ux, uy, 14 * pulse, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+                ctx.fill();
+
+                // Inner solid dot
+                ctx.beginPath();
+                ctx.arc(ux, uy, 8, 0, Math.PI * 2);
+                ctx.fillStyle = '#10b981';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                // ── 5. Direction arrow toward next waypoint ──
+                if (targetWaypointIdx < navPath.length) {
+                    const target = navPath[targetWaypointIdx];
+                    const dx = target.x - userPosition.x;
+                    const dy = target.y - userPosition.y;
+                    const angle = Math.atan2(dy * scaleY, dx * scaleX);
+                    const arrowStart = 14;
+                    const arrowLen = 22;
+
+                    ctx.save();
+                    ctx.translate(ux, uy);
+                    ctx.rotate(angle);
+
+                    // Arrow shaft
+                    ctx.beginPath();
+                    ctx.moveTo(arrowStart, 0);
+                    ctx.lineTo(arrowStart + arrowLen, 0);
+                    ctx.strokeStyle = '#4ecca3';
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.stroke();
+
+                    // Arrow head
+                    ctx.beginPath();
+                    ctx.moveTo(arrowStart + arrowLen + 2, 0);
+                    ctx.lineTo(arrowStart + arrowLen - 6, -5);
+                    ctx.lineTo(arrowStart + arrowLen - 6, 5);
+                    ctx.closePath();
+                    ctx.fillStyle = '#4ecca3';
+                    ctx.fill();
+
+                    ctx.restore();
+                }
+            }
+        }
+
+        // ─── MAP SOURCE ────────────────────────────────────────────────
         function setMapSource() {
             if (serverUrl && mapImg) {
-                // Use PNG for background, much more reliable than SVG object
                 mapImg.src = serverUrl + '/static/floor_plans/basement.png';
-                // Reset canvas when map changes
                 const ctx = routeCanvas.getContext('2d');
                 ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
             }
         }
-        
+
+        // ─── CONNECTION ────────────────────────────────────────────────
         connectBtn.addEventListener('click', () => {
             let url = serverUrlInput.value.trim();
             if (!url) { alert('Enter server address'); return; }
@@ -284,7 +756,7 @@
             fetch(`${serverUrl}/health`)
                 .then(res => res.json())
                 .then(() => {
-                    statusEl.textContent = `✓ Connected`;
+                    statusEl.textContent = '✓ Connected';
                     statusEl.style.color = '#4ecca3';
                     startBtn.disabled = false;
                     voiceNavBtn.disabled = false;
@@ -295,7 +767,8 @@
                     statusEl.style.color = '#e74c3c';
                 });
         });
-        
+
+        // ─── CAMERA START/STOP ─────────────────────────────────────────
         startBtn.addEventListener('click', async () => {
             try {
                 if (!navigator.mediaDevices?.getUserMedia) {
@@ -308,12 +781,12 @@
                 });
                 videoEl.srcObject = stream;
                 await videoEl.play();
-                statusEl.textContent = '📷 Camera on — say your destination';
+                statusEl.textContent = '📷 Camera on — tap Navigate to set a route';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 announceBtn.disabled = false;
                 videoContainer.classList.add('show-video');
-                voicePrompt.textContent = 'Tap "Say destination" and say: "Take me to room 0010" (or type below). Tap Announce to hear what is in front of you.';
+                voicePrompt.textContent = 'Tap "Navigate" and say: "Take me to room 0010" (or type below). Tap "What\'s Ahead" to hear what is in front of you.';
                 connectWebSocket();
             } catch (err) {
                 statusEl.textContent = `Camera: ${err.message}`;
@@ -323,6 +796,7 @@
         
         stopBtn.addEventListener('click', () => {
             stopNavigation();
+            stopAllAudio();
             if (guidanceInterval) { clearInterval(guidanceInterval); guidanceInterval = null; }
             isProcessing = false;
             if (ws) { ws.close(); ws = null; }
@@ -333,7 +807,8 @@
             announceBtn.disabled = true;
             mapContainer.classList.remove('visible');
         });
-        
+
+        // ─── WEBSOCKET ─────────────────────────────────────────────────
         function connectWebSocket() {
             const wsUrl = serverUrl.replace('http', 'ws') + '/ws/video';
             ws = new WebSocket(wsUrl);
@@ -350,9 +825,8 @@
                     if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
                     if (data.instruction) lastSpokenAnnouncement = data.instruction;
                     
-                    // Ready for next frame
                     isProcessingWsFrame = false;
-                    if (isProcessing) setTimeout(sendFrame, 150); // Control frame rate
+                    if (isProcessing) setTimeout(sendFrame, 150);
                 } catch (e) {
                     console.error("WS parse error", e);
                     isProcessingWsFrame = false;
@@ -367,7 +841,6 @@
             
             isProcessingWsFrame = true;
             const canvas = document.createElement('canvas');
-            // Optimization: Scale down to 240px width for absolute minimum latency
             const scale = 240 / videoEl.videoWidth;
             canvas.width = 240;
             canvas.height = videoEl.videoHeight * scale;
@@ -382,11 +855,20 @@
                     else isProcessingWsFrame = false;
                 };
                 reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.4); 
+            }, 'image/jpeg', 0.4);
         }
-        
+
+        // ─── ANNOUNCE (What's Ahead) ───────────────────────────────────
         announceBtn.addEventListener('click', async () => {
             if (!videoEl.videoWidth || !serverUrl) return;
+            
+            // If currently speaking, stop it
+            if (isSpeakingEL) {
+                stopAllAudio();
+                statusEl.textContent = 'Stopped speaking';
+                return;
+            }
+
             announceBtn.disabled = true;
             statusEl.textContent = 'Analyzing scene…';
             try {
@@ -410,7 +892,7 @@
                     processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
                     videoContainer.classList.remove('show-video');
                 }
-                statusEl.textContent = 'Speaking…';
+                statusEl.textContent = '🗣️ Speaking…';
                 await speakWithElevenLabs(announcement);
                 lastSpokenAnnouncement = announcement;
             } catch (err) {
@@ -419,9 +901,12 @@
                 speak(lastSpokenAnnouncement || "Something went wrong. Check the server connection.");
             }
             announceBtn.disabled = false;
-            if (isProcessing) statusEl.textContent = 'Camera on — tap Announce again for directions';
+            if (isProcessing) statusEl.textContent = isNavigating 
+                ? '🧭 Navigating to room ' + navDestination 
+                : 'Camera on — tap What\'s Ahead for directions';
         });
-        
+
+        // ─── DETECTIONS LIST ───────────────────────────────────────────
         function updateDetectionsList(objects) {
             if (!objects?.length) { detectionList.innerHTML = '<em>Path clear</em>'; return; }
             objects.sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
@@ -436,37 +921,8 @@
                 return `<div class="detection-item"><span>${obj.label}</span><span class="${cls}">${text}</span></div>`;
             }).join('');
         }
-        
-        function speak(text) {
-            if (!text) return;
-            lastSpokenAnnouncement = text;
-            const u = new SpeechSynthesisUtterance(text);
-            u.rate = 0.9;
-            speechSynthesis.speak(u);
-        }
-        
-        async function speakWithElevenLabs(text) {
-            if (!text) return;
-            try {
-                const res = await fetch(serverUrl + '/announce', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
-                });
-                if (!res.ok) throw new Error(res.status);
-                const blob = await res.blob();
-                if (!blob || blob.size === 0) throw new Error('No audio');
-                const url = URL.createObjectURL(blob);
-                const audio = new Audio(url);
-                audio.onended = () => URL.revokeObjectURL(url);
-                audio.onerror = () => { URL.revokeObjectURL(url); speak(text); };
-                await audio.play();
-            } catch (e) {
-                console.warn('ElevenLabs fallback to TTS:', e);
-                speak(text);
-            }
-        }
-        
+
+        // ─── VOICE NAVIGATION ──────────────────────────────────────────
         voiceNavBtn.addEventListener('click', () => {
             if (isNavigating) { stopNavigation(); return; }
             startVoiceRecognition();
@@ -503,7 +959,7 @@
         }
         
         function resetVoiceBtn() {
-            voiceNavBtn.textContent = '🎤 Say destination';
+            voiceNavBtn.textContent = '🎤 Navigate';
             voiceNavBtn.classList.remove('active-nav');
         }
         
@@ -511,7 +967,8 @@
             const dest = document.getElementById('manualDest').value.trim();
             if (dest) parseNavigationCommand('go to room ' + dest);
         });
-        
+
+        // ─── NAVIGATION ────────────────────────────────────────────────
         async function parseNavigationCommand(text) {
             statusEl.textContent = 'Finding route…';
             try {
@@ -539,27 +996,36 @@
         }
         
         function startNavigation(data) {
+            // Stop any previous navigation
+            if (isNavigating) stopNavigation();
+
             isNavigating = true;
             navPath = data.path || [];
             navDestination = data.destination || '?';
             
-            navInfo.textContent = 'Destination: Room ' + navDestination;
+            navInfo.textContent = 'Navigating to Room ' + navDestination;
             if (serverUrl && !mapImg.src) mapImg.src = serverUrl + '/static/floor_plans/basement.png';
             mapContainer.classList.add('visible');
-            voiceNavBtn.textContent = '🛑 Stop nav';
+            voiceNavBtn.textContent = '🛑 Stop';
             voiceNavBtn.classList.add('active-nav');
             statusEl.textContent = '🧭 Navigating to room ' + navDestination;
             
-            speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will tell you when to turn and when to watch for obstacles. Tap Announce to hear what is in front of you.`);
+            // Speak navigation instruction (stops any current audio first)
+            speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will tell you when to turn and when to watch for obstacles. Tap What's Ahead to hear what is in front of you.`);
             
-            // Draw route on canvas
-            setTimeout(() => drawPathOnMap(navPath), 500); // Wait for image load/layout
+            // Start live position tracking with slight delay for image load
+            setTimeout(() => {
+                startPositionTracking();
+            }, 300);
             
             startDynamicGuidance();
         }
         
         function stopNavigation() {
             isNavigating = false;
+            stopPositionTracking();
+            stopAllAudio();
+            
             // Clear canvas
             const ctx = routeCanvas.getContext('2d');
             ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
@@ -568,64 +1034,18 @@
             mapContainer.classList.remove('visible');
             resetVoiceBtn();
             statusEl.textContent = 'Navigation stopped';
-            speak('Navigation stopped.');
         }
-        
-        function drawPathOnMap(path) {
-            if (!path?.length) return;
-            
-            const ctx = routeCanvas.getContext('2d');
-            // Match canvas size to displayed image size
-            routeCanvas.width = mapImg.clientWidth;
-            routeCanvas.height = mapImg.clientHeight;
-            
-            if (routeCanvas.width === 0) {
-                // Image not loaded yet, retry
-                setTimeout(() => drawPathOnMap(path), 500);
-                return;
-            }
-            
-            // Clear previous
-            ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
-            
-            // Assuming path coordinates match the intrinsic image size (1224x792)
-            // We need to scale them to the displayed size
-            const scaleX = routeCanvas.width / 1224;
-            const scaleY = routeCanvas.height / 792;
-            
-            // Draw Path
-            ctx.beginPath();
-            ctx.moveTo(path[0].x * scaleX, path[0].y * scaleY);
-            for (let i = 1; i < path.length; i++) {
-                ctx.lineTo(path[i].x * scaleX, path[i].y * scaleY);
-            }
-            ctx.strokeStyle = '#007bff';
-            ctx.lineWidth = 5;
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            ctx.stroke();
-            
-            // Draw Points
-            path.forEach((p, i) => {
-                const x = p.x * scaleX;
-                const y = p.y * scaleY;
-                
-                ctx.beginPath();
-                ctx.arc(x, y, i === 0 || i === path.length - 1 ? 8 : 4, 0, Math.PI * 2);
-                ctx.fillStyle = i === 0 ? '#2ecc71' : (i === path.length - 1 ? '#e74c3c' : '#3498db');
-                ctx.fill();
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            });
-        }
-        
+
+        // ─── DYNAMIC GUIDANCE (with overlap protection) ────────────────
         function startDynamicGuidance() {
-            if (guidanceInterval) return;
+            if (guidanceInterval) clearInterval(guidanceInterval);
+
             const navContext = `User is heading to room ${navDestination}. Give one short instruction.`;
             
             guidanceInterval = setInterval(async () => {
-                if (!isNavigating || !isProcessing || !videoEl.videoWidth) return;
+                // Don't overlap: skip if already speaking or not navigating
+                if (!isNavigating || !isProcessing || !videoEl.videoWidth || isSpeakingEL) return;
+
                 try {
                     const canvas = document.createElement('canvas');
                     const scale = Math.min(1, 640 / videoEl.videoWidth);
@@ -640,14 +1060,15 @@
                     const res = await fetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
                     const data = await res.json();
                     const announcement = data.announcement;
-                    if (announcement) {
-                        statusEl.textContent = '🗣️ ' + announcement.slice(0, 40) + '…';
+                    if (announcement && !isSpeakingEL) {
+                        statusEl.textContent = '🗣️ ' + announcement.slice(0, 50) + '…';
                         await speakWithElevenLabs(announcement);
                     }
                 } catch (e) { console.warn('Guidance:', e); }
-            }, 8000); // Increased to 8s to avoid hitting rate limits
+            }, 10000); // 10s interval, plus skip if still speaking
         }
-        
+
+        // ─── INIT ──────────────────────────────────────────────────────
         window.addEventListener('load', () => {
             const host = window.location.hostname;
             const port = window.location.port;

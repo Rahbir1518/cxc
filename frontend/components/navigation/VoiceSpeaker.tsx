@@ -12,14 +12,37 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+
+  // Stop any currently playing audio (ElevenLabs + browser TTS)
+  const stopAll = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }, []);
 
   // Speak text using ElevenLabs TTS via server
   const speak = useCallback(
     async (text: string) => {
-      if (!text || !serverUrl) {
+      if (!text) return;
+
+      // CRITICAL: stop any current audio before starting new
+      stopAll();
+
+      if (!serverUrl) {
         // Fallback to browser TTS
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
+        utterance.onend = () => setIsSpeaking(false);
+        setIsSpeaking(true);
         speechSynthesis.speak(utterance);
         return;
       }
@@ -40,15 +63,20 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
 
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
+        blobUrlRef.current = url;
         const audio = new Audio(url);
 
         audio.onended = () => {
           URL.revokeObjectURL(url);
+          blobUrlRef.current = null;
+          audioRef.current = null;
           setIsSpeaking(false);
         };
 
         audio.onerror = () => {
           URL.revokeObjectURL(url);
+          blobUrlRef.current = null;
+          audioRef.current = null;
           setIsSpeaking(false);
           // Fallback to browser TTS
           const utterance = new SpeechSynthesisUtterance(text);
@@ -67,19 +95,13 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
         speechSynthesis.speak(utterance);
       }
     },
-    [serverUrl]
+    [serverUrl, stopAll]
   );
-
-  const stop = useCallback(() => {
-    audioRef.current?.pause();
-    speechSynthesis.cancel();
-    setIsSpeaking(false);
-  }, []);
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
       <button
-        onClick={stop}
+        onClick={stopAll}
         disabled={!isSpeaking}
         className={`rounded-full p-3 text-white shadow-lg transition-all ${
           isSpeaking
@@ -106,9 +128,31 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
 
 // Export speak function for use in other components
 export function useSpeaker(serverUrl?: string) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
+  const isSpeakingRef = useRef(false);
+
+  const stopAll = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      audioRef.current = null;
+    }
+    if (blobUrlRef.current) {
+      URL.revokeObjectURL(blobUrlRef.current);
+      blobUrlRef.current = null;
+    }
+    speechSynthesis.cancel();
+    isSpeakingRef.current = false;
+  }, []);
+
   const speak = useCallback(
     async (text: string) => {
       if (!text) return;
+
+      // CRITICAL: stop previous audio before starting new
+      stopAll();
+      isSpeakingRef.current = true;
 
       if (serverUrl) {
         try {
@@ -119,10 +163,28 @@ export function useSpeaker(serverUrl?: string) {
           });
 
           if (response.ok) {
+            // Check if we got interrupted while waiting
+            if (!isSpeakingRef.current) return;
+
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
+            blobUrlRef.current = url;
+
             const audio = new Audio(url);
-            audio.onended = () => URL.revokeObjectURL(url);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              blobUrlRef.current = null;
+              audioRef.current = null;
+              isSpeakingRef.current = false;
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              blobUrlRef.current = null;
+              audioRef.current = null;
+              isSpeakingRef.current = false;
+            };
+
+            audioRef.current = audio;
             await audio.play();
             return;
           }
@@ -134,10 +196,13 @@ export function useSpeaker(serverUrl?: string) {
       // Browser TTS fallback
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.rate = 0.9;
+      utterance.onend = () => {
+        isSpeakingRef.current = false;
+      };
       speechSynthesis.speak(utterance);
     },
-    [serverUrl]
+    [serverUrl, stopAll]
   );
 
-  return { speak };
+  return { speak, stopAll, isSpeakingRef };
 }

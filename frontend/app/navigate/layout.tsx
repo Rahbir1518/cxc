@@ -1,4 +1,4 @@
-export default function NavigationLayout({
+export default function NavigateLayout({
   children,
 }: {
   children: React.ReactNode;
