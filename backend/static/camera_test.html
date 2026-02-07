@@ -244,6 +244,7 @@
         let ws = null;
         let stream = null;
         let isProcessing = false;
+        let isProcessingWsFrame = false;
         let lastDetections = [];
         let lastSpokenAnnouncement = '';
         
@@ -331,23 +332,34 @@
                 }
                 if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
                 if (data.instruction) lastSpokenAnnouncement = data.instruction;
-                if (isProcessing) setTimeout(sendFrame, 100);
+                
+                // Ready for next frame
+                isProcessingWsFrame = false;
+                if (isProcessing) setTimeout(sendFrame, 150); // Control frame rate
             };
             ws.onerror = () => { statusEl.textContent = 'WebSocket error'; statusEl.style.color = '#e74c3c'; };
             ws.onclose = () => { if (isProcessing) setTimeout(connectWebSocket, 2000); };
         }
         
         function sendFrame() {
-            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
+            if (isProcessingWsFrame || !videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            isProcessingWsFrame = true;
             const canvas = document.createElement('canvas');
-            canvas.width = videoEl.videoWidth;
-            canvas.height = videoEl.videoHeight;
-            canvas.getContext('2d').drawImage(videoEl, 0, 0);
+            // Optimization: Scale down to 240px width for absolute minimum latency
+            const scale = 240 / videoEl.videoWidth;
+            canvas.width = 240;
+            canvas.height = videoEl.videoHeight * scale;
+            
+            canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             canvas.toBlob(blob => {
                 const reader = new FileReader();
-                reader.onload = () => ws.send(reader.result.split(',')[1]);
+                reader.onload = () => {
+                    ws.send(reader.result.split(',')[1]);
+                    // We'll reset this in onmessage when server replies
+                };
                 reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.7);
+            }, 'image/jpeg', 0.4); // Even lower quality for speed
         }
         
         announceBtn.addEventListener('click', async () => {

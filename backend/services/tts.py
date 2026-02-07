@@ -38,27 +38,17 @@ def generate_voice_and_track_cost(
     Returns:
         Audio data as bytes (MP3 format)
     """
-    client = get_elevenlabs_client()
-    
-    # Get raw response with headers to track character cost
-    response = client.text_to_speech.with_raw_response.convert(
-        text=text,
-        voice_id=voice_id,
-        model_id=model_id,
-        output_format="mp3_44100_128",
-    )
-    
-    # Access character cost from headers
-    char_cost = response.headers.get("x-character-count", "unknown")
-    request_id = response.headers.get("request-id", "unknown")
-    
-    print(f"🔊 ElevenLabs TTS:")
-    print(f"   Request ID: {request_id}")
-    print(f"   Characters: {char_cost}")
-    print(f"   Text: {text[:50]}..." if len(text) > 50 else f"   Text: {text}")
-    
-    # Return audio bytes
-    return response.content
+    try:
+        # Use simpler generate method which returns a generator of bytes
+        response = client.generate(
+            text=text,
+            voice=voice_id,
+            model=model_id
+        )
+        return b"".join(response)
+    except Exception as e:
+        print(f"✗ TTS Generation Error: {e}")
+        raise e
 
 
 def generate_obstacle_announcement(
