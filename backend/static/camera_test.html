@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Indoor Navigation - Camera Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        header {
+            background: #16213e;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        #status {
+            font-size: 0.9rem;
+            color: #4ecca3;
+        }
+        
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            gap: 1rem;
+        }
+        
+        .video-container {
+            position: relative;
+            background: #0f0f23;
+            border-radius: 12px;
+            overflow: hidden;
+            flex: 1;
+        }
+        
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        
+        #processedFrame {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 1rem 2rem;
+            font-size: 1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        #startBtn {
+            background: linear-gradient(135deg, #4ecca3, #38a3a5);
+            color: #1a1a2e;
+        }
+        
+        #stopBtn {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        #announceBtn {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        button:active:not(:disabled) {
+            transform: scale(0.95);
+        }
+        
+        .info-panel {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 1rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .info-panel h2 {
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            color: #4ecca3;
+        }
+        
+        #detectionList {
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+        
+        .detection-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid #2a2a4e;
+        }
+        
+        .distance-close {
+            color: #e74c3c;
+        }
+        
+        .distance-medium {
+            color: #f39c12;
+        }
+        
+        .distance-far {
+            color: #4ecca3;
+        }
+        
+        .server-input {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        .server-input input {
+            flex: 1;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            background: #0f0f23;
+            color: white;
+            font-size: 1rem;
+        }
+        
+        .server-input button {
+            padding: 0.75rem 1rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔍 Indoor Navigation Camera</h1>
+        <div id="status">Enter server address to connect</div>
+    </header>
+    
+    <div class="container">
+        <div class="server-input">
+            <input type="text" id="serverUrl" placeholder="Server IP (e.g., 192.168.1.100:8000)" value="">
+            <button id="connectBtn">Connect</button>
+        </div>
+        
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <img id="processedFrame" alt="Processed camera feed">
+        </div>
+        
+        <div class="info-panel">
+            <h2>Detected Objects</h2>
+            <div id="detectionList">No detections yet. Start the camera to begin.</div>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn" disabled>📷 Start Camera</button>
+            <button id="stopBtn" disabled>⏹️ Stop</button>
+            <button id="announceBtn" disabled>🔊 Announce</button>
+        </div>
+    </div>
+    
+    <script>
+        // DOM elements
+        const serverUrlInput = document.getElementById('serverUrl');
+        const connectBtn = document.getElementById('connectBtn');
+        const statusEl = document.getElementById('status');
+        const videoEl = document.getElementById('videoElement');
+        const processedFrame = document.getElementById('processedFrame');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const announceBtn = document.getElementById('announceBtn');
+        const detectionList = document.getElementById('detectionList');
+        
+        // State
+        let serverUrl = '';
+        let ws = null;
+        let stream = null;
+        let isProcessing = false;
+        let lastDetections = [];
+        
+        // Connect to server
+        connectBtn.addEventListener('click', () => {
+            serverUrl = serverUrlInput.value.trim();
+            if (!serverUrl) {
+                alert('Please enter server address');
+                return;
+            }
+            
+            // Add protocol if missing
+            if (!serverUrl.startsWith('http')) {
+                serverUrl = 'http://' + serverUrl;
+            }
+            
+            // Test connection
+            fetch(`${serverUrl}/health`)
+                .then(res => res.json())
+                .then(data => {
+                    statusEl.textContent = `✓ Connected to ${serverUrl}`;
+                    statusEl.style.color = '#4ecca3';
+                    startBtn.disabled = false;
+                })
+                .catch(err => {
+                    statusEl.textContent = `✗ Failed to connect: ${err.message}`;
+                    statusEl.style.color = '#e74c3c';
+                });
+        });
+        
+        // Start camera
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Check if we are in a secure context
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    const isHttps = window.location.protocol === 'https:';
+                    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+                    
+                    let errorMsg = '📷 Camera API (getUserMedia) is not available.';
+                    if (!isHttps && !isLocalhost) {
+                        errorMsg += '\n\nReason: Browsers only allow camera access on HTTPS or "localhost". Accessing via IP (http://10.x.x.x) is considered insecure.';
+                        errorMsg += '\n\nSolution: Use an HTTPS tunnel like ngrok or check browser flags to allow this IP.';
+                    }
+                    
+                    alert(errorMsg);
+                    statusEl.textContent = 'Error: Secure context required for camera';
+                    statusEl.style.color = '#e74c3c';
+                    return;
+                }
+
+                // Request camera with back camera preference
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                
+                videoEl.srcObject = stream;
+                await videoEl.play();
+                
+                statusEl.textContent = '📷 Camera active - processing...';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                announceBtn.disabled = false;
+                
+                // Start WebSocket connection
+                connectWebSocket();
+                
+            } catch (err) {
+                statusEl.textContent = `Camera error: ${err.message}`;
+                statusEl.style.color = '#e74c3c';
+            }
+        });
+        
+        // Stop camera
+        stopBtn.addEventListener('click', () => {
+            stopProcessing();
+        });
+        
+        function stopProcessing() {
+            isProcessing = false;
+            
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            
+            statusEl.textContent = 'Camera stopped';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            announceBtn.disabled = true;
+        }
+        
+        // WebSocket connection for real-time processing
+        function connectWebSocket() {
+            const wsUrl = serverUrl.replace('http', 'ws') + '/ws/video';
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                isProcessing = true;
+                sendFrame();
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                if (data.error) {
+                    console.error('Server error:', data.error);
+                    return;
+                }
+                
+                // Update processed frame
+                if (data.frame_base64) {
+                    processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
+                }
+                
+                // Update detections list
+                if (data.objects) {
+                    lastDetections = data.objects;
+                    updateDetectionsList(data.objects);
+                }
+                
+                // Send next frame
+                if (isProcessing) {
+                    setTimeout(sendFrame, 100); // ~10 FPS
+                }
+            };
+            
+            ws.onerror = (err) => {
+                console.error('WebSocket error:', err);
+                statusEl.textContent = 'WebSocket error';
+                statusEl.style.color = '#e74c3c';
+            };
+            
+            ws.onclose = () => {
+                console.log('WebSocket closed');
+                if (isProcessing) {
+                    statusEl.textContent = 'Connection lost, reconnecting...';
+                    setTimeout(connectWebSocket, 2000);
+                }
+            };
+        }
+        
+        // Capture and send frame
+        function sendFrame() {
+            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) {
+                return;
+            }
+            
+            // Create canvas to capture frame
+            const canvas = document.createElement('canvas');
+            canvas.width = videoEl.videoWidth;
+            canvas.height = videoEl.videoHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0);
+            
+            // Convert to base64 JPEG
+            canvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    // Send just the base64 data (without the data URL prefix)
+                    const base64 = reader.result.split(',')[1];
+                    ws.send(base64);
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.7);
+        }
+        
+        // Update detections list UI
+        function updateDetectionsList(objects) {
+            if (!objects || objects.length === 0) {
+                detectionList.innerHTML = '<em>Path appears clear</em>';
+                return;
+            }
+            
+            // Sort by distance
+            objects.sort((a, b) => (a.distance || 999) - (b.distance || 999));
+            
+            detectionList.innerHTML = objects.map(obj => {
+                let distanceClass = 'distance-far';
+                let distanceText = 'unknown';
+                
+                if (obj.distance !== null) {
+                    if (obj.distance < 1) {
+                        distanceClass = 'distance-close';
+                        distanceText = `${obj.distance.toFixed(1)}m ⚠️`;
+                    } else if (obj.distance < 2) {
+                        distanceClass = 'distance-medium';
+                        distanceText = `${obj.distance.toFixed(1)}m`;
+                    } else {
+                        distanceText = `${obj.distance.toFixed(1)}m`;
+                    }
+                }
+                
+                return `
+                    <div class="detection-item">
+                        <span>${obj.label}</span>
+                        <span class="${distanceClass}">${distanceText}</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Announce button
+        announceBtn.addEventListener('click', async () => {
+            if (!lastDetections || lastDetections.length === 0) {
+                speak('The path ahead appears clear.');
+                return;
+            }
+            
+            // Generate announcement from last detections
+            try {
+                const response = await fetch(`${serverUrl}/announce`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: generateAnnouncement(lastDetections)
+                    })
+                });
+                
+                if (response.ok) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    audio.play();
+                } else {
+                    // Fallback to browser TTS
+                    speak(generateAnnouncement(lastDetections));
+                }
+            } catch (err) {
+                console.error('Announce error:', err);
+                speak(generateAnnouncement(lastDetections));
+            }
+        });
+        
+        // Generate announcement text
+        function generateAnnouncement(objects) {
+            const nearby = objects
+                .filter(o => o.distance && o.distance < 5)
+                .sort((a, b) => a.distance - b.distance)
+                .slice(0, 3);
+            
+            if (nearby.length === 0) {
+                return 'The path ahead appears clear.';
+            }
+            
+            const parts = nearby.map(o => {
+                const dist = o.distance < 1 ? 'very close' : `${o.distance.toFixed(1)} meters`;
+                return `${o.label} at ${dist}`;
+            });
+            
+            return 'Nearby: ' + parts.join(', ') + '.';
+        }
+        
+        // Browser TTS fallback
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 0.9;
+            speechSynthesis.speak(utterance);
+        }
+        
+        // Auto-detect local server
+        window.addEventListener('load', () => {
+            // Try common local addresses
+            const hostname = window.location.hostname;
+            if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+                serverUrlInput.value = hostname + ':8000';
+            } else {
+                serverUrlInput.value = 'localhost:8000';
+            }
+        });
+    </script>
+</body>
+</html>

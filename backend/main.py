@@ -1,1 +1,349 @@
-print("This is main.py")
+"""
+FastAPI server for indoor navigation CV services.
+Provides endpoints for:
+- Object detection with bounding boxes
+- Depth estimation for distances
+- WebSocket for real-time video streaming
+- ElevenLabs TTS for voice announcements
+"""
+
+import os
+import io
+import base64
+import asyncio
+from contextlib import asynccontextmanager
+from typing import List, Optional
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Local imports
+from services.detection import ObjectDetector, DetectedObject, get_detector
+from services.depth import DepthEstimator, get_depth_estimator
+from services.tts import generate_voice_and_track_cost
+
+load_dotenv()
+
+
+# Pydantic models for API
+class DetectionResponse(BaseModel):
+    objects: List[dict]
+    frame_base64: Optional[str] = None  # Annotated frame as base64
+    
+
+class AnnouncementRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
+# Global model instances
+detector: Optional[ObjectDetector] = None
+depth_estimator: Optional[DepthEstimator] = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load ML models on startup."""
+    global detector, depth_estimator
+    
+    print("="*50)
+    print("🚀 Starting Indoor Navigation CV Service")
+    print("="*50)
+    
+    print("\n📦 Loading object detection model (YOLOv8)...")
+    detector = get_detector()
+    
+    print("\n📦 Loading depth estimation model (MiDaS)...")
+    try:
+        depth_estimator = get_depth_estimator()
+    except Exception as e:
+        print(f"⚠️  Depth model failed to load: {e}")
+        print("   Distance estimation will be disabled.")
+        depth_estimator = None
+    
+    print("\n✅ Server ready!")
+    print("="*50)
+    
+    yield
+    
+    print("\n👋 Shutting down...")
+
+
+app = FastAPI(
+    title="Indoor Navigation CV Service",
+    description="Real-time object detection and distance estimation for visually impaired navigation",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# CORS - allow phone browser to access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for phone testing
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static files (camera test page)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/")
+async def root():
+    """Health check endpoint."""
+    return {
+        "status": "running",
+        "service": "Indoor Navigation CV",
+        "detector_loaded": detector is not None,
+        "depth_loaded": depth_estimator is not None,
+    }
+
+
+@app.get("/health")
+async def health_check():
+    """Detailed health check."""
+    return {
+        "status": "healthy",
+        "models": {
+            "detector": "YOLOv8" if detector else "not loaded",
+            "depth": "MiDaS" if depth_estimator else "not loaded",
+        }
+    }
+
+
+@app.post("/detect", response_model=DetectionResponse)
+async def detect_objects(
+    file: UploadFile = File(...),
+    draw_boxes: bool = True,
+    estimate_depth: bool = True,
+):
+    """
+    Detect objects in an uploaded image.
+    
+    - **file**: Image file (JPEG, PNG)
+    - **draw_boxes**: Whether to return annotated image
+    - **estimate_depth**: Whether to calculate distances
+    
+    Returns detected objects with optional annotated frame.
+    """
+    if detector is None:
+        raise HTTPException(status_code=503, detail="Detector not loaded")
+    
+    # Read image
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
+    # Detect objects
+    detections = detector.detect(frame)
+    
+    # Estimate depth/distance if available
+    if estimate_depth and depth_estimator is not None:
+        depth_map, _ = depth_estimator.estimate(frame)
+        for det in detections:
+            det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
+    
+    # Draw bounding boxes
+    frame_base64 = None
+    if draw_boxes:
+        annotated = detector.draw_detections(frame, detections)
+        _, buffer = cv2.imencode('.jpg', annotated)
+        frame_base64 = base64.b64encode(buffer).decode('utf-8')
+    
+    return DetectionResponse(
+        objects=[det.to_dict() for det in detections],
+        frame_base64=frame_base64,
+    )
+
+
+@app.post("/announce")
+async def announce_surroundings(request: AnnouncementRequest):
+    """
+    Generate voice announcement using ElevenLabs.
+    
+    - **text**: Text to speak
+    - **voice_id**: Optional ElevenLabs voice ID
+    
+    Returns audio as streaming response.
+    """
+    try:
+        audio_data = generate_voice_and_track_cost(
+            text=request.text,
+            voice_id=request.voice_id or "JBFqnCBsd6RMkjVDRZzb",  # Default: calm voice
+        )
+        
+        return StreamingResponse(
+            io.BytesIO(audio_data),
+            media_type="audio/mpeg",
+            headers={"Content-Disposition": "attachment; filename=announcement.mp3"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
+
+
+@app.post("/analyze-and-announce")
+async def analyze_and_announce(file: UploadFile = File(...)):
+    """
+    Detect objects, calculate distances, and generate voice announcement.
+    
+    Returns:
+    - Detected objects with distances
+    - Annotated frame
+    - Voice announcement describing the scene
+    """
+    if detector is None:
+        raise HTTPException(status_code=503, detail="Detector not loaded")
+    
+    # Read image
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
+    # Detect objects
+    detections = detector.detect(frame)
+    
+    # Estimate distances
+    if depth_estimator is not None:
+        depth_map, _ = depth_estimator.estimate(frame)
+        for det in detections:
+            det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
+    
+    # Generate announcement text
+    if not detections:
+        announcement = "The path ahead appears clear."
+    else:
+        # Sort by distance (closest first)
+        sorted_dets = sorted(
+            [d for d in detections if d.distance and d.distance < 5],
+            key=lambda x: x.distance or float('inf')
+        )
+        
+        if not sorted_dets:
+            announcement = "I see some objects, but they appear to be far away."
+        else:
+            items = []
+            for det in sorted_dets[:3]:  # Top 3 closest
+                dist_text = f"{det.distance:.1f} meters" if det.distance else "nearby"
+                items.append(f"{det.label} at {dist_text}")
+            
+            announcement = "Nearby objects: " + ", ".join(items) + "."
+    
+    # Draw boxes
+    annotated = detector.draw_detections(frame, detections)
+    _, buffer = cv2.imencode('.jpg', annotated)
+    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+    
+    return JSONResponse({
+        "objects": [det.to_dict() for det in detections],
+        "frame_base64": frame_base64,
+        "announcement": announcement,
+    })
+
+
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"📱 Client connected. Total: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+        print(f"📱 Client disconnected. Total: {len(self.active_connections)}")
+
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws/video")
+async def websocket_video(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time video processing.
+    
+    Client sends: base64-encoded JPEG frames
+    Server sends: JSON with detections + annotated frame base64
+    """
+    await manager.connect(websocket)
+    
+    try:
+        while True:
+            # Receive frame as base64 string
+            data = await websocket.receive_text()
+            
+            # Decode base64 to image
+            try:
+                image_data = base64.b64decode(data)
+                nparr = np.frombuffer(image_data, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception as e:
+                await websocket.send_json({"error": f"Invalid frame: {e}"})
+                continue
+            
+            if frame is None:
+                await websocket.send_json({"error": "Could not decode frame"})
+                continue
+            
+            # Detect objects
+            detections = detector.detect(frame) if detector else []
+            
+            # Estimate distances
+            if depth_estimator is not None and detections:
+                depth_map, _ = depth_estimator.estimate(frame)
+                for det in detections:
+                    det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
+            
+            # Draw annotations
+            if detections:
+                annotated = detector.draw_detections(frame, detections)
+            else:
+                annotated = frame
+            
+            # Encode annotated frame
+            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Send response
+            await websocket.send_json({
+                "objects": [det.to_dict() for det in detections],
+                "frame_base64": frame_base64,
+            })
+            
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Get port from env or default to 8000
+    port = int(os.getenv("PORT", 8000))
+    
+    print(f"\n🌐 Starting server on http://0.0.0.0:{port}")
+    print(f"📱 For phone access, use your computer's local IP address")
+    print(f"   Example: http://192.168.x.x:{port}")
+    
+    uvicorn.run(
+        app,
+        host="0.0.0.0",  # Allow external connections
+        port=port,
+        reload=False,  # Disable reload for production
+    )
