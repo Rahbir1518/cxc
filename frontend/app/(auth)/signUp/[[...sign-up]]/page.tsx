@@ -18,6 +18,7 @@ export default function SignUpPage() {
 
         <SignUp
           afterSignOutUrl="/"
+          forceRedirectUrl="/dashboard"
           signInUrl="/signIn"
           appearance={{
             elements: {
