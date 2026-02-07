@@ -11,6 +11,7 @@ import os
 import io
 import time
 import base64
+import asyncio
 from PIL import Image
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -32,6 +33,19 @@ from services.reasoning import ObstacleClassifier, get_classifier
 from services.pathfinding import get_pathfinder
 
 load_dotenv()
+
+
+def _make_json_serializable(obj):
+    """Convert numpy/scalar types to native Python for JSON."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (np.floating, np.integer)):
+        return float(obj) if isinstance(obj, np.floating) else int(obj)
+    return obj
 
 
 # Pydantic models for API
@@ -163,7 +177,7 @@ async def detect_objects(
     # Draw bounding boxes
     frame_base64 = None
     if draw_boxes:
-        annotated = detector.draw_detections(frame, detections, copy=True)
+        annotated = detector.draw_detections(frame, detections)
         _, buffer = cv2.imencode('.jpg', annotated)
         frame_base64 = base64.b64encode(buffer).decode('utf-8')
     
@@ -280,16 +294,17 @@ async def analyze_and_announce(
         navigation_context=navigation_context
     )
     
-    # Draw boxes (copy=True: we still need the original frame above for Gemini)
-    annotated = detector.draw_detections(frame, detections, copy=True)
+    # Draw boxes
+    annotated = detector.draw_detections(frame, detections)
     _, buffer = cv2.imencode('.jpg', annotated)
     frame_base64 = base64.b64encode(buffer).decode('utf-8')
     
-    # Classify detections for response (to_dict + classify_all produce JSON-safe dicts)
+    # Classify detections for response (ensure JSON-serializable, e.g. no numpy float32)
     classified = classifier.classify_all(detection_dicts)
+    objects_serializable = _make_json_serializable(classified)
     
     return JSONResponse({
-        "objects": classified,
+        "objects": objects_serializable,
         "frame_base64": frame_base64,
         "announcement": announcement,
     })
@@ -317,146 +332,116 @@ manager = ConnectionManager()
 async def websocket_video(websocket: WebSocket):
     """
     WebSocket endpoint for real-time video processing.
-
-    Algorithmic optimisations over naive implementation:
-    ┌──────────────────────────┬──────────────────────────────────────────┐
-    │ Technique                │ Complexity improvement                   │
-    ├──────────────────────────┼──────────────────────────────────────────┤
-    │ Binary WS frames         │ Removes base64 decode O(n) + 33% data  │
-    │ estimate_fast()          │ Bilinear O(w·h·4) vs bicubic O(w·h·16) │
-    │ get_distance_bbox_fast() │ O(1) 3×3 sample vs O(k log k) median   │
-    │ draw in-place            │ Eliminates O(w·h·3) frame.copy()       │
-    │ to_dict() pre-converts   │ Removes recursive _make_json walk      │
-    │ classify once            │ 1× classify_all vs 2× in old code      │
-    │ instruction(pre_class.)  │ Skips redundant classify_all call       │
-    │ Background depth thread  │ Depth never blocks the frame loop       │
-    └──────────────────────────┴──────────────────────────────────────────┘
-
-    Client may send EITHER raw binary JPEG bytes OR base64-encoded text.
-    Server always returns JSON with frame_base64 on every processed frame.
+    
+    Client sends: base64-encoded JPEG frames
+    Server sends: JSON with detections + annotated frame base64
+    
+    Performance strategy — smooth video, throttled depth:
+    - Every frame: YOLO detection + draw annotations + encode → always send frame_base64
+    - Depth (MiDaS): runs on a *time-based* cooldown so it never blocks consecutive
+      frames.  Between depth runs the cached depth map is re-used for distance lookups.
+    - Instruction text: cached and only regenerated when detected labels change.
+    - Frame dropping: stale queued frames are drained so only the latest is processed.
     """
     await manager.connect(websocket)
-
-    # ── Tunables ──
-    DEPTH_COOLDOWN_S    = 2.0   # min seconds between depth runs
-    INSTRUCTION_EVERY_N = 10    # re-generate text every Nth frame
-
+    
+    # ── Depth throttle (time-based, not frame-count) ──
+    DEPTH_COOLDOWN_S    = 1.5  # Minimum seconds between depth runs
+    INSTRUCTION_EVERY_N = 8    # Regenerate instruction text every Nth frame
+    
     # ── Per-connection state ──
-    frame_count        = 0
-    cached_depth_map   = None
-    cached_instruction = ""
-    cached_classified: list = []
-    cached_label_set: frozenset = frozenset()
-    last_depth_time    = 0.0
-    depth_running      = False  # guard for background depth
-
-    # Pre-fetch singletons once (avoid repeated global dict lookups)
-    _detector   = detector
-    _depth      = depth_estimator
-    _classifier = get_classifier()
-
-    # Thread pool for offloading MiDaS so it never blocks the frame loop
-    from concurrent.futures import ThreadPoolExecutor
-    _depth_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="depth")
-
+    frame_count         = 0
+    cached_depth_map    = None
+    cached_instruction  = ""
+    cached_classified   = []
+    cached_label_set    = set()
+    last_depth_time     = 0.0   # monotonic timestamp of last depth calc
+    
     try:
         while True:
-            # ── 1. Receive frame (binary or text) ────────────────────
-            msg = await websocket.receive()
-
-            if "bytes" in msg and msg["bytes"]:
-                # Fast path: raw binary JPEG from modern clients
-                raw_bytes = msg["bytes"]
-            elif "text" in msg and msg["text"]:
-                # Legacy path: base64-encoded text
-                raw_bytes = base64.b64decode(msg["text"])
-            else:
+            # ── 1. Drain queue — keep only the freshest frame ──
+            data = await websocket.receive_text()
+            while True:
+                try:
+                    newer = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=0.001
+                    )
+                    data = newer          # drop the older frame
+                except asyncio.TimeoutError:
+                    break
+            
+            # ── 2. Decode ──
+            try:
+                image_bytes = base64.b64decode(data)
+                nparr = np.frombuffer(image_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception as e:
+                await websocket.send_json({"error": f"Invalid frame: {e}"})
                 continue
-
-            # ── 2. Decode JPEG → numpy (O(w*h)) ─────────────────────
-            nparr = np.frombuffer(raw_bytes, np.uint8)
-            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
             if frame is None:
                 await websocket.send_json({"error": "Could not decode frame"})
                 continue
-
+            
             frame_count += 1
             now = time.monotonic()
-
-            # ── 3. YOLO detection — every frame (~30-50 ms) ─────────
-            detections = _detector.detect(frame) if _detector else []
-
-            # ── 4. Depth — background thread, time-gated ────────────
-            #    Runs estimate_fast (bilinear, no normalization) in a
-            #    thread so the main loop is never blocked by MiDaS.
-            if (_depth is not None
+            
+            # ── 3. Detection — every frame (YOLOv8n, ~30-50 ms) ──
+            detections = detector.detect(frame) if detector else []
+            
+            # ── 4. Depth — only when cooldown has elapsed ──
+            if (depth_estimator is not None
                     and detections
-                    and not depth_running
                     and (now - last_depth_time) >= DEPTH_COOLDOWN_S):
-                depth_running = True
-                _frame_for_depth = frame  # capture reference
-
-                def _run_depth(f=_frame_for_depth):
-                    return _depth.estimate_fast(f)
-
-                depth_future = _depth_pool.submit(_run_depth)
-
-                def _on_depth_done(fut, _now=now):
-                    nonlocal cached_depth_map, last_depth_time, depth_running
-                    try:
-                        cached_depth_map = fut.result()
-                        last_depth_time = _now
-                    except Exception as exc:
-                        print(f"⚠️ Depth error: {exc}")
-                    depth_running = False
-
-                depth_future.add_done_callback(_on_depth_done)
-
-            # ── 5. Distance lookup — O(1) per detection ──────────────
+                cached_depth_map, _ = depth_estimator.estimate(frame)
+                last_depth_time = now
+            
+            # Re-use cached depth map for fast per-bbox distance lookup (~<1 ms)
             if cached_depth_map is not None and detections:
                 for det in detections:
-                    det.distance = _depth.get_distance_for_bbox_fast(
+                    det.distance = depth_estimator.get_distance_for_bbox(
                         cached_depth_map, det.bbox
                     )
-
-            # ── 6. Classify — single pass, O(n) n≤5 ─────────────────
+            
+            # ── 5. Classify (cheap) ──
             detection_dicts = [det.to_dict() for det in detections]
-            classified = _classifier.classify_all(detection_dicts)
-            cached_classified = classified   # already JSON-safe
-
-            # ── 7. Annotate IN-PLACE + JPEG encode ───────────────────
-            if detections:
-                _detector.draw_detections(frame, detections)  # in-place, no copy
+            classifier = get_classifier()
+            classified = classifier.classify_all(detection_dicts)
+            cached_classified = classified
+            
+            # ── 6. Annotate + encode — every frame for smooth video ──
+            annotated = (
+                detector.draw_detections(frame, detections)
+                if detections else frame
+            )
             _, buffer = cv2.imencode(
-                '.jpg', frame,
+                '.jpg', annotated,
                 [cv2.IMWRITE_JPEG_QUALITY, 45]
             )
             frame_b64 = base64.b64encode(buffer).decode('utf-8')
-
-            # ── 8. Instruction — cache until labels change ───────────
-            current_labels = frozenset(d["label"] for d in classified)
+            
+            # ── 7. Instruction — cache until labels change ──
+            current_labels = frozenset(d.get("label", "") for d in classified)
             if (current_labels != cached_label_set
                     or frame_count % INSTRUCTION_EVERY_N == 0
                     or not cached_instruction):
-                cached_instruction = _classifier.generate_navigation_instruction(
-                    detection_dicts, pre_classified=classified
+                cached_instruction = classifier.generate_navigation_instruction(
+                    detection_dicts
                 )
                 cached_label_set = current_labels
-
-            # ── 9. Send — no recursive serialisation needed ──────────
+            
+            # ── 8. Send — always includes frame_base64 for smooth playback ──
             await websocket.send_json({
-                "objects":      cached_classified,
+                "objects": _make_json_serializable(cached_classified),
                 "frame_base64": frame_b64,
-                "instruction":  cached_instruction,
+                "instruction": cached_instruction,
             })
-
+            
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket error: {e}")
         manager.disconnect(websocket)
-    finally:
-        _depth_pool.shutdown(wait=False)
 
 
 if __name__ == "__main__":
