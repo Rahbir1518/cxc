@@ -4,54 +4,91 @@ Provides clear, natural guidance for visually impaired users.
 """
 
 import os
+import asyncio
 from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
+# ── Singleton ElevenLabs client ──
+_elevenlabs_client = None
+
+
 def get_elevenlabs_client():
-    """Get ElevenLabs client instance."""
+    """Get or create singleton ElevenLabs client instance."""
+    global _elevenlabs_client
+    if _elevenlabs_client is not None:
+        return _elevenlabs_client
     try:
         from elevenlabs.client import ElevenLabs
         api_key = os.getenv("ELEVENLABS_API_KEY")
         if not api_key:
             raise ValueError("ELEVENLABS_API_KEY not set in environment")
-        return ElevenLabs(api_key=api_key)
+        _elevenlabs_client = ElevenLabs(api_key=api_key)
+        return _elevenlabs_client
     except ImportError:
         raise ImportError("elevenlabs package not installed. Run: pip install elevenlabs")
 
 
-def generate_voice_and_track_cost(
+def _sync_generate_voice(
+    text: str,
+    voice_id: str,
+    model_id: str,
+) -> bytes:
+    """Synchronous TTS generation (runs in thread pool)."""
+    client = get_elevenlabs_client()
+    response = client.text_to_speech.convert(
+        text=text,
+        voice_id=voice_id,
+        model_id=model_id,
+        output_format="mp3_44100_128",
+    )
+    return b"".join(response)
+
+
+async def generate_voice_and_track_cost(
     text: str,
     voice_id: str = "JBFqnCBsd6RMkjVDRZzb",  # Default: calm, clear voice
     model_id: str = "eleven_flash_v2_5",  # Use Flash v2.5 for low latency
+    max_retries: int = 2,
+    timeout_s: float = 15.0,
 ) -> bytes:
     """
-    Generate speech from text and track character costs.
-    
+    Generate speech from text (async, non-blocking).
+
+    Runs the blocking ElevenLabs SDK call in a thread pool so
+    the FastAPI event loop stays responsive. Includes retry with
+    exponential backoff and a per-attempt timeout.
+
     Args:
         text: Text to convert to speech
         voice_id: ElevenLabs voice ID
         model_id: ElevenLabs model to use
-        
+        max_retries: Number of retry attempts on transient failure
+        timeout_s: Timeout per attempt in seconds
+
     Returns:
         Audio data as bytes (MP3 format)
     """
-    client = get_elevenlabs_client()
-    try:
-        # ElevenLabs SDK v2 uses text_to_speech.convert() instead of generate()
-        response = client.text_to_speech.convert(
-            text=text,
-            voice_id=voice_id,
-            model_id=model_id,
-            output_format="mp3_44100_128",
-        )
-        # Response is a generator of bytes chunks
-        return b"".join(response)
-    except Exception as e:
-        print(f"✗ TTS Generation Error: {e}")
-        raise e
+    last_err: Optional[Exception] = None
+    for attempt in range(max_retries + 1):
+        try:
+            audio = await asyncio.wait_for(
+                asyncio.to_thread(_sync_generate_voice, text, voice_id, model_id),
+                timeout=timeout_s,
+            )
+            return audio
+        except asyncio.TimeoutError:
+            last_err = TimeoutError(f"TTS timed out after {timeout_s}s")
+            print(f"✗ TTS timeout (attempt {attempt + 1}/{max_retries + 1})")
+        except Exception as e:
+            last_err = e
+            print(f"✗ TTS error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        # Exponential backoff before retry
+        if attempt < max_retries:
+            await asyncio.sleep(0.5 * (2 ** attempt))
+    raise last_err  # type: ignore[misc]
 
 
 def generate_obstacle_announcement(

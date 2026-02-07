@@ -50,11 +50,14 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
       setIsSpeaking(true);
       setError(null);
 
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 12000); // 12s timeout
       try {
         const response = await fetch(`${serverUrl}/announce`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -93,6 +96,8 @@ export function VoiceSpeaker({ serverUrl, className = "" }: VoiceSpeakerProps) {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.rate = 0.9;
         speechSynthesis.speak(utterance);
+      } finally {
+        clearTimeout(timer);
       }
     },
     [serverUrl, stopAll]
@@ -155,12 +160,17 @@ export function useSpeaker(serverUrl?: string) {
       isSpeakingRef.current = true;
 
       if (serverUrl) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12000); // 12s timeout
         try {
           const response = await fetch(`${serverUrl}/announce`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text }),
+            signal: controller.signal,
           });
+
+          clearTimeout(timer);
 
           if (response.ok) {
             // Check if we got interrupted while waiting
@@ -189,6 +199,7 @@ export function useSpeaker(serverUrl?: string) {
             return;
           }
         } catch {
+          clearTimeout(timer);
           // Fallback below
         }
       }

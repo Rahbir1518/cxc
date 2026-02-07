@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import dynamic from "next/dynamic";
 import {
   Mic,
   MicOff,
@@ -12,9 +13,38 @@ import {
   Eye,
   MapPin,
 } from "lucide-react";
-import { FloorPlanMap } from "@/components/navigation/FloorPlanMap";
-import { CameraStream } from "@/components/navigation/CameraStream";
 import { useSpeaker } from "@/components/navigation/VoiceSpeaker";
+
+// ── Lazy-loaded heavy components (Phase 4: code splitting) ──
+const FloorPlanMap = dynamic(
+  () =>
+    import("@/components/navigation/FloorPlanMap").then(
+      (mod) => mod.FloorPlanMap
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-[280px] bg-slate-900 rounded-xl animate-pulse">
+        <Navigation className="h-8 w-8 text-slate-600" />
+      </div>
+    ),
+  }
+);
+
+const CameraStream = dynamic(
+  () =>
+    import("@/components/navigation/CameraStream").then(
+      (mod) => mod.CameraStream
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center min-h-[200px] bg-slate-900 rounded-xl animate-pulse">
+        <Video className="h-8 w-8 text-slate-600" />
+      </div>
+    ),
+  }
+);
 
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
@@ -55,19 +85,29 @@ export default function NavigatePage() {
   // ── Speaker (with overlap protection) ──
   const { speak, stopAll: stopAudio, isSpeakingRef } = useSpeaker(BACKEND_URL);
 
-  // ── Connect to backend ──
+  // ── Connect to backend (with timeout) ──
   const connect = useCallback(async () => {
     setIsConnecting(true);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000); // 5s timeout
     try {
-      const res = await fetch(`${BACKEND_URL}/health`);
+      const res = await fetch(`${BACKEND_URL}/health`, {
+        signal: controller.signal,
+      });
       if (res.ok) {
         setIsConnected(true);
         setStatus("Connected — start camera and navigate");
       } else {
         setStatus("Server error: " + res.status);
       }
-    } catch {
-      setStatus("Cannot reach server");
+    } catch (err: any) {
+      setStatus(
+        err?.name === "AbortError"
+          ? "Server timed out — check connection"
+          : "Cannot reach server"
+      );
+    } finally {
+      clearTimeout(timer);
     }
     setIsConnecting(false);
   }, []);
@@ -119,15 +159,18 @@ export default function NavigatePage() {
     setIsListening(false);
   }, []);
 
-  // ── Parse navigation command ──
+  // ── Parse navigation command (with timeout) ──
   const parseNavCommand = useCallback(
     async (text: string) => {
       setStatus("Finding route...");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15000); // 15s timeout
       try {
         const res = await fetch(`${BACKEND_URL}/navigate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text, start_room: START_ROOM }),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
@@ -151,9 +194,15 @@ export default function NavigatePage() {
             `Heading to room ${data.destination}. Tap What's Ahead to hear surroundings.`
         );
       } catch (err: any) {
-        setStatus("❌ " + (err.message || "Failed to find path"));
+        const msg =
+          err?.name === "AbortError"
+            ? "Navigation request timed out"
+            : err.message || "Failed to find path";
+        setStatus("❌ " + msg);
         speak("I couldn't find a path to that room.");
         setShowManual(true);
+      } finally {
+        clearTimeout(timer);
       }
     },
     [speak]
@@ -169,7 +218,7 @@ export default function NavigatePage() {
     setStatus("Navigation stopped");
   }, [stopAudio]);
 
-  // ── Announce (What's Ahead) ──
+  // ── Announce (What's Ahead) with timeout ──
   const announceScene = useCallback(async () => {
     // If currently speaking, stop it
     if (isSpeakingRef.current) {
@@ -179,6 +228,8 @@ export default function NavigatePage() {
     }
 
     setStatus("Analyzing scene...");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000); // 45s timeout
     try {
       const video = document.querySelector("video");
       if (!video || !video.videoWidth) {
@@ -209,6 +260,7 @@ export default function NavigatePage() {
       const res = await fetch(`${BACKEND_URL}/analyze-and-announce`, {
         method: "POST",
         body: form,
+        signal: controller.signal,
       });
       if (!res.ok) throw new Error("Server " + res.status);
 
@@ -225,8 +277,14 @@ export default function NavigatePage() {
           : "Camera on — tap What's Ahead"
       );
     } catch (err: any) {
-      setStatus("Error: " + err.message);
+      const msg =
+        err?.name === "AbortError"
+          ? "Scene analysis timed out"
+          : err.message || "Unknown error";
+      setStatus("Error: " + msg);
       speak("Something went wrong. Check the server connection.");
+    } finally {
+      clearTimeout(timer);
     }
   }, [speak, stopAudio, isSpeakingRef, isNavigating, destination]);
 

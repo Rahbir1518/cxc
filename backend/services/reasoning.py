@@ -6,10 +6,15 @@ Uses DISTANCE only to determine obstacles. No hardcoded object lists.
 import os
 import base64
 import io
+import asyncio
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ── Retry helper ──
+GEMINI_TIMEOUT_S = 12.0
+GEMINI_MAX_RETRIES = 2
 
 # Try to import new google-genai SDK (preferred over deprecated google.generativeai)
 try:
@@ -195,9 +200,13 @@ class ObstacleClassifier:
         """
         
         try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.client.models.generate_content,
+                    model=self.model_name,
+                    contents=prompt,
+                ),
+                timeout=GEMINI_TIMEOUT_S,
             )
             text = response.text.strip()
             # Clean up potential markdown formatting
@@ -265,11 +274,24 @@ RULES:
                     mime_type="image/jpeg"
                 )
                 
-                response = self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=[prompt, image_part]
-                )
-                return response.text.strip()
+                last_err = None
+                for attempt in range(GEMINI_MAX_RETRIES + 1):
+                    try:
+                        response = await asyncio.wait_for(
+                            asyncio.to_thread(
+                                self.client.models.generate_content,
+                                model=self.model_name,
+                                contents=[prompt, image_part],
+                            ),
+                            timeout=GEMINI_TIMEOUT_S,
+                        )
+                        return response.text.strip()
+                    except (asyncio.TimeoutError, Exception) as retry_err:
+                        last_err = retry_err
+                        if attempt < GEMINI_MAX_RETRIES:
+                            await asyncio.sleep(0.5 * (2 ** attempt))
+                print(f"⚠️ Gemini Visual reasoning failed after retries: {last_err}")
+                return self.generate_navigation_instruction(detections)
             except Exception as e:
                 print(f"⚠️ Gemini Visual reasoning failed (Rate Limit?): {e}")
                 # FALLBACK to rule-based logic immediately
@@ -295,15 +317,24 @@ RULES:
         scene_text = "\n".join(scene_desc)
         prompt_text = f"You are speaking to a blind person. Goal: {navigation_context}\nScene:\n{scene_text}\n\nReply with one short verbal command: say 'Take X steps left' or 'Take X steps right' if blocked, or 'Path clear, walk forward' if clear. Max 15 words."
 
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt_text
-            )
-            return response.text.strip()
-        except Exception as e:
-            print(f"⚠️ Gemini Text reasoning failed: {e}")
-            return self.generate_navigation_instruction(detections)
+        last_err = None
+        for attempt in range(GEMINI_MAX_RETRIES + 1):
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=self.model_name,
+                        contents=prompt_text,
+                    ),
+                    timeout=GEMINI_TIMEOUT_S,
+                )
+                return response.text.strip()
+            except (asyncio.TimeoutError, Exception) as retry_err:
+                last_err = retry_err
+                if attempt < GEMINI_MAX_RETRIES:
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+        print(f"⚠️ Gemini Text reasoning failed after retries: {last_err}")
+        return self.generate_navigation_instruction(detections)
 
 # Singleton
 _classifier: Optional[ObstacleClassifier] = None

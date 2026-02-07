@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import React from "react";
 import { Navigation, MapPin } from "lucide-react";
+
+// ── Module-level SVG cache ──
+const _svgCache = new Map<string, string>();
 
 interface PathNode {
   x: number;
@@ -23,7 +27,7 @@ interface FloorPlanMapProps {
   onArrived?: () => void;
 }
 
-export function FloorPlanMap({
+function FloorPlanMapInner({
   floorPlanUrl,
   path = [],
   currentPosition: externalPosition,
@@ -50,12 +54,20 @@ export function FloorPlanMap({
   // Determine which position to display
   const displayPosition = externalPosition || livePosition;
 
-  // Get SVG viewBox from floor plan image
+  // Get SVG viewBox from floor plan image (with module-level cache)
   useEffect(() => {
     if (floorPlanUrl.endsWith(".svg")) {
+      const cached = _svgCache.get(floorPlanUrl);
+      if (cached) {
+        const match = cached.match(/viewBox="([^"]+)"/);
+        if (match) setViewBox(match[1]);
+        setIsLoaded(true);
+        return;
+      }
       fetch(floorPlanUrl)
         .then((res) => res.text())
         .then((svgText) => {
+          _svgCache.set(floorPlanUrl, svgText); // cache for future mounts
           const match = svgText.match(/viewBox="([^"]+)"/);
           if (match) setViewBox(match[1]);
           setIsLoaded(true);
@@ -165,8 +177,10 @@ export function FloorPlanMap({
   // Determine the current waypoint index for rendering
   const activeWaypointIdx = simulateLiveTracking ? targetWaypointIdx : 0;
 
+  // ── Memoized SVG path calculations (avoid recomputing on unrelated re-renders) ──
+
   // Generate SVG path for traversed portion (green)
-  const traversedD = (() => {
+  const traversedD = useMemo(() => {
     if (!displayPosition || !path.length || activeWaypointIdx <= 0) return "";
     const parts = [`M ${path[0].x},${path[0].y}`];
     for (let i = 1; i < Math.min(activeWaypointIdx, path.length); i++) {
@@ -174,10 +188,10 @@ export function FloorPlanMap({
     }
     parts.push(`L ${displayPosition.x},${displayPosition.y}`);
     return parts.join(" ");
-  })();
+  }, [displayPosition, path, activeWaypointIdx]);
 
   // Generate SVG path for remaining portion (blue dashed)
-  const remainingD = (() => {
+  const remainingD = useMemo(() => {
     if (!path.length || activeWaypointIdx >= path.length) return "";
     const startPt = displayPosition || path[0];
     const parts = [`M ${startPt.x},${startPt.y}`];
@@ -185,22 +199,25 @@ export function FloorPlanMap({
       parts.push(`L ${path[i].x},${path[i].y}`);
     }
     return parts.join(" ");
-  })();
+  }, [displayPosition, path, activeWaypointIdx]);
 
   // Full path (used when no live tracking)
-  const fullPathD =
-    !simulateLiveTracking && path.length > 1
-      ? `M ${path.map((p) => `${p.x},${p.y}`).join(" L ")}`
-      : "";
+  const fullPathD = useMemo(
+    () =>
+      !simulateLiveTracking && path.length > 1
+        ? `M ${path.map((p) => `${p.x},${p.y}`).join(" L ")}`
+        : "",
+    [simulateLiveTracking, path]
+  );
 
   // Direction arrow angle
-  const directionAngle = (() => {
+  const directionAngle = useMemo(() => {
     if (!displayPosition || activeWaypointIdx >= path.length) return null;
     const target = path[activeWaypointIdx];
     const dx = target.x - displayPosition.x;
     const dy = target.y - displayPosition.y;
     return (Math.atan2(dy, dx) * 180) / Math.PI;
-  })();
+  }, [displayPosition, path, activeWaypointIdx]);
 
   return (
     <div
@@ -489,3 +506,5 @@ export function FloorPlanMap({
     </div>
   );
 }
+
+export const FloorPlanMap = React.memo(FloorPlanMapInner);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
+import React from "react";
 import { Camera, Video, VideoOff, AlertCircle } from "lucide-react";
 
 interface DetectedObject {
@@ -26,7 +27,12 @@ interface CameraStreamProps {
   sendQuality?: number;
 }
 
-export function CameraStream({
+// ── WebSocket reconnection config ──
+const WS_MAX_RETRIES = 5;
+const WS_BASE_DELAY_MS = 1000;
+const WS_MAX_DELAY_MS = 30000;
+
+function CameraStreamInner({
   serverUrl,
   onDetections,
   onInstruction,
@@ -56,7 +62,12 @@ export function CameraStream({
   const fpsCounterRef = useRef(0);
   const fpsTimerRef = useRef(0);
 
-  // Connect to WebSocket
+  // ── WebSocket reconnection state ──
+  const wsRetriesRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intentionalCloseRef = useRef(false);
+
+  // Connect to WebSocket (with auto-reconnection)
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -66,6 +77,7 @@ export function CameraStream({
     ws.onopen = () => {
       setIsConnected(true);
       setError(null);
+      wsRetriesRef.current = 0; // reset retries on successful connect
     };
 
     ws.onmessage = (event) => {
@@ -81,8 +93,6 @@ export function CameraStream({
       lastRTTRef.current = rtt;
 
       // Adaptive interval: target ~60% utilization
-      // If server responds in 50ms, we can send every ~80ms
-      // If server responds in 300ms, back off to ~500ms
       adaptiveIntervalRef.current = Math.max(
         80,
         Math.min(800, Math.round(rtt * 1.6))
@@ -97,7 +107,7 @@ export function CameraStream({
         fpsTimerRef.current = now;
       }
 
-      // Update displayed frame (server sends annotated frame on every response)
+      // Update displayed frame
       if (data.frame_base64) {
         setProcessedFrame(`data:image/jpeg;base64,${data.frame_base64}`);
         onFrame?.(data.frame_base64);
@@ -122,6 +132,21 @@ export function CameraStream({
     ws.onclose = () => {
       setIsConnected(false);
       awaitingResponseRef.current = false;
+
+      // ── Auto-reconnect with exponential backoff ──
+      if (!intentionalCloseRef.current && wsRetriesRef.current < WS_MAX_RETRIES) {
+        const delay = Math.min(
+          WS_MAX_DELAY_MS,
+          WS_BASE_DELAY_MS * Math.pow(2, wsRetriesRef.current)
+        );
+        wsRetriesRef.current++;
+        setError(`Reconnecting (${wsRetriesRef.current}/${WS_MAX_RETRIES})...`);
+        reconnectTimerRef.current = setTimeout(() => {
+          connect();
+        }, delay);
+      } else if (wsRetriesRef.current >= WS_MAX_RETRIES) {
+        setError("Connection lost. Please restart camera.");
+      }
     };
 
     wsRef.current = ws;
@@ -129,6 +154,8 @@ export function CameraStream({
 
   // Start camera and streaming
   const startStreaming = useCallback(async () => {
+    intentionalCloseRef.current = false;
+    wsRetriesRef.current = 0;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -153,8 +180,13 @@ export function CameraStream({
     }
   }, [connect]);
 
-  // Stop streaming
+  // Stop streaming (intentional close — no reconnect)
   const stopStreaming = useCallback(() => {
+    intentionalCloseRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (videoRef.current?.srcObject) {
       (videoRef.current.srcObject as MediaStream)
         .getTracks()
@@ -170,6 +202,7 @@ export function CameraStream({
     setIsConnected(false);
     setProcessedFrame(null);
     awaitingResponseRef.current = false;
+    wsRetriesRef.current = 0;
   }, []);
 
   // ── Frame sender with backpressure + adaptive rate ──
@@ -310,3 +343,5 @@ export function CameraStream({
     </div>
   );
 }
+
+export const CameraStream = React.memo(CameraStreamInner);

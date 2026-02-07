@@ -165,12 +165,12 @@ async def detect_objects(
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid image file")
     
-    # Detect objects
-    detections = detector.detect(frame)
+    # Detect objects (offload to thread pool to avoid blocking event loop)
+    detections = await asyncio.to_thread(detector.detect, frame)
     
     # Estimate depth/distance if available
     if estimate_depth and depth_estimator is not None:
-        depth_map, _ = depth_estimator.estimate(frame)
+        depth_map, _ = await asyncio.to_thread(depth_estimator.estimate, frame)
         for det in detections:
             det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
     
@@ -199,7 +199,7 @@ async def announce_surroundings(request: AnnouncementRequest):
     """
     try:
         print(f"🔊 Announce request: '{request.text}'")
-        audio_data = generate_voice_and_track_cost(
+        audio_data = await generate_voice_and_track_cost(
             text=request.text,
             voice_id=request.voice_id or "JBFqnCBsd6RMkjVDRZzb",  # Default: calm voice
         )
@@ -270,12 +270,12 @@ async def analyze_and_announce(
     if frame is None:
         raise HTTPException(status_code=400, detail="Invalid image file")
     
-    # Detect objects
-    detections = detector.detect(frame)
+    # Detect objects (offload to thread pool)
+    detections = await asyncio.to_thread(detector.detect, frame)
     
-    # Estimate distances
+    # Estimate distances (offload to thread pool)
     if depth_estimator is not None:
-        depth_map, _ = depth_estimator.estimate(frame)
+        depth_map, _ = await asyncio.to_thread(depth_estimator.estimate, frame)
         for det in detections:
             det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
     
@@ -386,14 +386,19 @@ async def websocket_video(websocket: WebSocket):
             frame_count += 1
             now = time.monotonic()
             
-            # ── 3. Detection — every frame (YOLOv8n, ~30-50 ms) ──
-            detections = detector.detect(frame) if detector else []
+            # ── 3. Detection — every frame (YOLOv8n, ~30-50 ms, offloaded) ──
+            detections = (
+                await asyncio.to_thread(detector.detect, frame)
+                if detector else []
+            )
             
-            # ── 4. Depth — only when cooldown has elapsed ──
+            # ── 4. Depth — only when cooldown has elapsed (offloaded) ──
             if (depth_estimator is not None
                     and detections
                     and (now - last_depth_time) >= DEPTH_COOLDOWN_S):
-                cached_depth_map, _ = depth_estimator.estimate(frame)
+                cached_depth_map, _ = await asyncio.to_thread(
+                    depth_estimator.estimate, frame
+                )
                 last_depth_time = now
             
             # Re-use cached depth map for fast per-bbox distance lookup (~<1 ms)
@@ -459,4 +464,5 @@ if __name__ == "__main__":
         host="0.0.0.0",  # Allow external connections
         port=port,
         reload=False,  # Disable reload for production
+        timeout_keep_alive=30,  # Close idle keep-alive connections after 30s
     )
