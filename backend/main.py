@@ -11,6 +11,7 @@ import os
 import io
 import base64
 import asyncio
+from PIL import Image
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -27,6 +28,7 @@ from dotenv import load_dotenv
 from services.detection import ObjectDetector, DetectedObject, get_detector
 from services.depth import DepthEstimator, get_depth_estimator
 from services.tts import generate_voice_and_track_cost
+from services.reasoning import ObstacleClassifier, get_classifier
 
 load_dotenv()
 
@@ -177,6 +179,7 @@ async def announce_surroundings(request: AnnouncementRequest):
     Returns audio as streaming response.
     """
     try:
+        print(f"🔊 Announce request: '{request.text}'")
         audio_data = generate_voice_and_track_cost(
             text=request.text,
             voice_id=request.voice_id or "JBFqnCBsd6RMkjVDRZzb",  # Default: calm voice
@@ -188,6 +191,8 @@ async def announce_surroundings(request: AnnouncementRequest):
             headers={"Content-Disposition": "attachment; filename=announcement.mp3"}
         )
     except Exception as e:
+        print(f"✗ TTS Error: {type(e).__name__}: {e}")
+        # Return error as JSON so client can fall back to browser TTS
         raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
 
 
@@ -221,33 +226,27 @@ async def analyze_and_announce(file: UploadFile = File(...)):
         for det in detections:
             det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
     
-    # Generate announcement text
-    if not detections:
-        announcement = "The path ahead appears clear."
-    else:
-        # Sort by distance (closest first)
-        sorted_dets = sorted(
-            [d for d in detections if d.distance and d.distance < 5],
-            key=lambda x: x.distance or float('inf')
-        )
-        
-        if not sorted_dets:
-            announcement = "I see some objects, but they appear to be far away."
-        else:
-            items = []
-            for det in sorted_dets[:3]:  # Top 3 closest
-                dist_text = f"{det.distance:.1f} meters" if det.distance else "nearby"
-                items.append(f"{det.label} at {dist_text}")
-            
-            announcement = "Nearby objects: " + ", ".join(items) + "."
+    # Generate announcement using Gemini reasoning
+    classifier = get_classifier()
+    detection_dicts = [det.to_dict() for det in detections]
+    
+    # Use async Gemini visual reasoning
+    # Convert BGR frame to RGB PIL Image
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb_frame)
+    
+    announcement = await classifier.reason_with_gemini(detection_dicts, image_data=pil_image)
     
     # Draw boxes
     annotated = detector.draw_detections(frame, detections)
     _, buffer = cv2.imencode('.jpg', annotated)
     frame_base64 = base64.b64encode(buffer).decode('utf-8')
     
+    # Classify detections for response
+    classified = classifier.classify_all(detection_dicts)
+    
     return JSONResponse({
-        "objects": [det.to_dict() for det in detections],
+        "objects": classified,
         "frame_base64": frame_base64,
         "announcement": announcement,
     })
@@ -318,10 +317,17 @@ async def websocket_video(websocket: WebSocket):
             _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_base64 = base64.b64encode(buffer).decode('utf-8')
             
+            # Generate navigation instruction
+            classifier = get_classifier()
+            detection_dicts = [det.to_dict() for det in detections]
+            instruction = classifier.generate_navigation_instruction(detection_dicts)
+            classified = classifier.classify_all(detection_dicts)
+            
             # Send response
             await websocket.send_json({
-                "objects": [det.to_dict() for det in detections],
+                "objects": classified,
                 "frame_base64": frame_base64,
+                "instruction": instruction,
             })
             
     except WebSocketDisconnect:

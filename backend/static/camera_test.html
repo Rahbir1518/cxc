@@ -212,6 +212,7 @@
         let stream = null;
         let isProcessing = false;
         let lastDetections = [];
+        let lastInstruction = 'The path ahead appears clear.';
         
         // Connect to server
         connectBtn.addEventListener('click', () => {
@@ -342,6 +343,11 @@
                     updateDetectionsList(data.objects);
                 }
                 
+                // Store the server's instruction
+                if (data.instruction) {
+                    lastInstruction = data.instruction;
+                }
+                
                 // Send next frame
                 if (isProcessing) {
                     setTimeout(sendFrame, 100); // ~10 FPS
@@ -424,35 +430,55 @@
             }).join('');
         }
         
-        // Announce button
+        // Announce button - use server instruction
+        // Announce button - use SMART visual reasoning
         announceBtn.addEventListener('click', async () => {
-            if (!lastDetections || lastDetections.length === 0) {
-                speak('The path ahead appears clear.');
-                return;
-            }
+            // Disable button during processing
+            announceBtn.disabled = true;
+            statusEl.textContent = '🧠 Analyzing scene...';
             
-            // Generate announcement from last detections
             try {
-                const response = await fetch(`${serverUrl}/announce`, {
+                // 1. Capture current frame as Blob
+                const canvas = document.createElement('canvas');
+                canvas.width = videoEl.videoWidth;
+                canvas.height = videoEl.videoHeight;
+                canvas.getContext('2d').drawImage(videoEl, 0, 0);
+                
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+                
+                // 2. Send to server for Deep Reasoning
+                const formData = new FormData();
+                formData.append('file', blob, 'scene.jpg');
+                
+                const response = await fetch(`${serverUrl}/analyze-and-announce`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: generateAnnouncement(lastDetections)
-                    })
+                    body: formData
                 });
                 
-                if (response.ok) {
-                    const audioBlob = await response.blob();
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
-                    audio.play();
-                } else {
-                    // Fallback to browser TTS
-                    speak(generateAnnouncement(lastDetections));
+                if (!response.ok) {
+                    throw new Error(`Server returned ${response.status}`);
                 }
+                
+                const data = await response.json();
+                const announcement = data.announcement || "I couldn't analyze the scene.";
+                
+                statusEl.textContent = '🗣️ Speaking: ' + announcement;
+                
+                // 3. Play audio or use browser TTS
+                // Note: The endpoint returns JSON, not audio directly. 
+                // We should add a TTS call or just use browser TTS for speed/reliability.
+                speak(announcement);
+                
             } catch (err) {
-                console.error('Announce error:', err);
-                speak(generateAnnouncement(lastDetections));
+                console.error('Analysis error:', err);
+                statusEl.textContent = 'Error: ' + err.message;
+                // Fallback to local logic
+                speak(lastInstruction || "I'm having trouble connecting.");
+            } finally {
+                announceBtn.disabled = false;
+                setTimeout(() => {
+                    if (isProcessing) statusEl.textContent = '📷 Camera active - processing...';
+                }, 3000);
             }
         });
         
