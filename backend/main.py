@@ -405,11 +405,42 @@ class ConnectionManager:
         print(f"📱 Client connected. Total: {len(self.active_connections)}")
     
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
         print(f"📱 Client disconnected. Total: {len(self.active_connections)}")
 
 
+# Viewer connection manager (for dashboard viewers)
+class ViewerManager:
+    def __init__(self):
+        self.viewers: List[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.viewers.append(websocket)
+        print(f"👁️  Viewer connected. Total: {len(self.viewers)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.viewers:
+            self.viewers.remove(websocket)
+        print(f"👁️  Viewer disconnected. Total: {len(self.viewers)}")
+    
+    async def broadcast(self, data: dict):
+        """Send data to all connected viewers."""
+        if not self.viewers:
+            return
+        disconnected = []
+        for viewer in self.viewers:
+            try:
+                await viewer.send_json(data)
+            except Exception:
+                disconnected.append(viewer)
+        for v in disconnected:
+            self.disconnect(v)
+
+
 manager = ConnectionManager()
+viewer_manager = ViewerManager()
 
 
 @app.websocket("/ws/video")
@@ -520,17 +551,52 @@ async def websocket_video(websocket: WebSocket):
                 cached_label_set = current_labels
             
             # ── 8. Send — always includes frame_base64 for smooth playback ──
-            await websocket.send_json({
+            response_data = {
                 "objects": _make_json_serializable(cached_classified),
                 "frame_base64": frame_b64,
                 "instruction": cached_instruction,
-            })
+            }
+            await websocket.send_json(response_data)
+            
+            # ── 9. Broadcast to dashboard viewers ──
+            await viewer_manager.broadcast(response_data)
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
         print(f"WebSocket error: {e}")
         manager.disconnect(websocket)
+
+
+@app.websocket("/ws/viewer")
+async def websocket_viewer(websocket: WebSocket):
+    """
+    WebSocket endpoint for dashboard viewers.
+    
+    Viewers receive the same processed frames and detections as the camera
+    client, broadcast in real-time from /ws/video. This allows the dashboard
+    to display the phone's camera feed without opening a local webcam.
+    
+    The viewer does NOT send frames — it only receives.
+    """
+    await viewer_manager.connect(websocket)
+    try:
+        # Keep connection alive — wait for client disconnect
+        while True:
+            # Accept pings / text (heartbeat) from dashboard
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                # Send a keepalive ping
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        viewer_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"Viewer WebSocket error: {e}")
+        viewer_manager.disconnect(websocket)
 
 
 if __name__ == "__main__":
