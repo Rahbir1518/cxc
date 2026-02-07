@@ -853,8 +853,7 @@
                         fpsTimer = now;
                     }
 
-                    // Only update image when server sends an annotated frame
-                    // (server skips annotation on some frames for speed)
+                    // Update displayed frame (server sends annotated frame every response)
                     if (data.frame_base64) {
                         processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
                         videoContainer.classList.remove('show-video');

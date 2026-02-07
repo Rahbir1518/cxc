@@ -97,8 +97,7 @@ export function CameraStream({
         fpsTimerRef.current = now;
       }
 
-      // Only update displayed frame if server sent one (frame skipping means
-      // not every response includes frame_base64)
+      // Update displayed frame (server sends annotated frame on every response)
       if (data.frame_base64) {
         setProcessedFrame(`data:image/jpeg;base64,${data.frame_base64}`);
         onFrame?.(data.frame_base64);
