@@ -903,16 +903,18 @@
             }
 
             sendCtx.drawImage(videoEl, 0, 0, sendCanvas.width, sendCanvas.height);
+
+            // ── KEY OPTIMISATION: send raw binary instead of base64 ──
+            // Saves:  FileReader overhead, .split(",") O(n), 33% inflation,
+            //         and base64.b64decode on the server.
             sendCanvas.toBlob(blob => {
                 if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
-                const reader = new FileReader();
-                reader.onload = () => {
+                blob.arrayBuffer().then(buf => {
                     awaitingResponse = true;
                     sendTimestamp = Date.now();
-                    ws.send(reader.result.split(',')[1]);
-                };
-                reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.35);  // Lower quality = smaller payload = faster
+                    ws.send(buf);   // binary frame — no base64
+                });
+            }, 'image/jpeg', 0.35);
         }
 
         // ─── ANNOUNCE (What's Ahead) ───────────────────────────────────

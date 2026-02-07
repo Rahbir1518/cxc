@@ -22,7 +22,7 @@ interface CameraStreamProps {
   autoStart?: boolean;
   /** Target send width in px (lower = faster). Default 240 */
   sendWidth?: number;
-  /** JPEG quality 0-1 for sent frames. Default 0.4 */
+  /** JPEG quality 0-1 for sent frames. Default 0.35 */
   sendQuality?: number;
 }
 
@@ -34,7 +34,7 @@ export function CameraStream({
   className = "",
   autoStart = false,
   sendWidth = 240,
-  sendQuality = 0.4,
+  sendQuality = 0.35,
 }: CameraStreamProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -47,11 +47,11 @@ export function CameraStream({
   // ── Backpressure & adaptive rate ──
   const awaitingResponseRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const adaptiveIntervalRef = useRef(200); // ms between sends, starts at 200
-  const lastRTTRef = useRef(200);          // last round-trip time in ms
+  const adaptiveIntervalRef = useRef(200);
+  const lastRTTRef = useRef(200);
   const sendTimestampRef = useRef(0);
 
-  // ── FPS counter for debug ──
+  // ── FPS counter ──
   const [fps, setFps] = useState(0);
   const fpsCounterRef = useRef(0);
   const fpsTimerRef = useRef(0);
@@ -62,6 +62,7 @@ export function CameraStream({
 
     const wsUrl = serverUrl.replace(/^http/, "ws") + "/ws/video";
     const ws = new WebSocket(wsUrl);
+    ws.binaryType = "arraybuffer"; // We send binary; server sends JSON text back
 
     ws.onopen = () => {
       setIsConnected(true);
@@ -76,19 +77,15 @@ export function CameraStream({
         return;
       }
 
-      // Measure RTT for adaptive rate
+      // RTT for adaptive rate
       const rtt = Date.now() - sendTimestampRef.current;
       lastRTTRef.current = rtt;
-
-      // Adaptive interval: target ~60% utilization
-      // If server responds in 50ms, we can send every ~80ms
-      // If server responds in 300ms, back off to ~500ms
       adaptiveIntervalRef.current = Math.max(
         80,
         Math.min(800, Math.round(rtt * 1.6))
       );
 
-      // FPS tracking
+      // FPS
       fpsCounterRef.current++;
       const now = Date.now();
       if (now - fpsTimerRef.current >= 1000) {
@@ -97,19 +94,15 @@ export function CameraStream({
         fpsTimerRef.current = now;
       }
 
-      // Update displayed frame (server sends annotated frame on every response)
+      // Frame + detections
       if (data.frame_base64) {
         setProcessedFrame(`data:image/jpeg;base64,${data.frame_base64}`);
         onFrame?.(data.frame_base64);
       }
-      if (data.objects) {
-        onDetections?.(data.objects);
-      }
-      if (data.instruction) {
-        onInstruction?.(data.instruction);
-      }
+      if (data.objects) onDetections?.(data.objects);
+      if (data.instruction) onInstruction?.(data.instruction);
 
-      // Release backpressure — allow next send
+      // Release backpressure
       awaitingResponseRef.current = false;
     };
 
@@ -118,7 +111,6 @@ export function CameraStream({
       setIsConnected(false);
       awaitingResponseRef.current = false;
     };
-
     ws.onclose = () => {
       setIsConnected(false);
       awaitingResponseRef.current = false;
@@ -127,7 +119,7 @@ export function CameraStream({
     wsRef.current = ws;
   }, [serverUrl, onDetections, onInstruction, onFrame]);
 
-  // Start camera and streaming
+  // Start camera
   const startStreaming = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -172,7 +164,7 @@ export function CameraStream({
     awaitingResponseRef.current = false;
   }, []);
 
-  // ── Frame sender with backpressure + adaptive rate ──
+  // ── Frame sender: binary blobs with backpressure + adaptive rate ──
   useEffect(() => {
     if (!isStreaming || !isConnected) return;
 
@@ -183,17 +175,21 @@ export function CameraStream({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Pre-size the reusable canvas once
+    // Size the reusable canvas once
     const scale = sendWidth / (video.videoWidth || 640);
     canvas.width = sendWidth;
     canvas.height = Math.round((video.videoHeight || 480) * scale);
 
     const trySendFrame = () => {
-      // Backpressure: don't send if still waiting for previous response
       if (awaitingResponseRef.current) return;
-      if (!video.videoWidth || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+      if (
+        !video.videoWidth ||
+        !wsRef.current ||
+        wsRef.current.readyState !== WebSocket.OPEN
+      )
+        return;
 
-      // Resize canvas if video dimensions changed
+      // Resize if video dimensions changed
       const newScale = sendWidth / video.videoWidth;
       const newH = Math.round(video.videoHeight * newScale);
       if (canvas.width !== sendWidth || canvas.height !== newH) {
@@ -201,35 +197,37 @@ export function CameraStream({
         canvas.height = newH;
       }
 
-      // Draw & encode
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+      // ── KEY OPTIMISATION ──
+      // Send raw binary JPEG bytes instead of base64 text.
+      // Saves:
+      //   • FileReader.readAsDataURL overhead  (was O(n) string alloc)
+      //   • .split(",")[1] string copy          (was O(n))
+      //   • 33% base64 size inflation on the wire
+      //   • base64.b64decode on the server      (was O(n))
       canvas.toBlob(
         (blob) => {
-          if (!blob || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+          if (
+            !blob ||
+            !wsRef.current ||
+            wsRef.current.readyState !== WebSocket.OPEN
+          )
+            return;
 
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = (reader.result as string).split(",")[1];
+          blob.arrayBuffer().then((buf) => {
             awaitingResponseRef.current = true;
             sendTimestampRef.current = Date.now();
-            wsRef.current?.send(base64);
-          };
-          reader.readAsDataURL(blob);
+            wsRef.current?.send(buf); // binary frame — no base64
+          });
         },
         "image/jpeg",
         sendQuality
       );
     };
 
-    // Use setInterval with adaptive rate instead of rAF
-    // (rAF fires at 60fps but we only need 5-12fps)
-    const tick = () => {
-      trySendFrame();
-    };
-
-    // Start with a fixed interval, then adapt
-    intervalRef.current = setInterval(tick, 100); // Check every 100ms
+    // Poll at fixed 100 ms; backpressure + adaptive rate self-regulate
+    intervalRef.current = setInterval(trySendFrame, 100);
 
     return () => {
       if (intervalRef.current) {
@@ -246,13 +244,15 @@ export function CameraStream({
   }, [autoStart, startStreaming, stopStreaming]);
 
   return (
-    <div className={`relative overflow-hidden rounded-xl bg-slate-900 ${className}`}>
+    <div
+      className={`relative overflow-hidden rounded-xl bg-slate-900 ${className}`}
+    >
       {/* Hidden video element */}
       <video ref={videoRef} className="hidden" playsInline muted />
       {/* Reusable hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
-      {/* Display processed frame or placeholder */}
+      {/* Processed frame or placeholder */}
       {processedFrame ? (
         <img
           src={processedFrame}
@@ -294,7 +294,7 @@ export function CameraStream({
         )}
       </div>
 
-      {/* Status indicator */}
+      {/* Status */}
       <div className="absolute left-2 top-2 flex items-center gap-2">
         <div
           className={`h-3 w-3 rounded-full ${
@@ -302,7 +302,7 @@ export function CameraStream({
           }`}
         />
         {isStreaming && (
-          <span className="text-[10px] text-white/50 font-mono">
+          <span className="font-mono text-[10px] text-white/50">
             {fps} fps · {lastRTTRef.current}ms
           </span>
         )}
