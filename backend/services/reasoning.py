@@ -145,13 +145,64 @@ class ObstacleClassifier:
             suggestion = "Step to your left."
             
         if dist < self.DANGER_DISTANCE:
-            return f"Stop! There is a {label} directly in your path. {suggestion}"
+            return f"Stop. There is a {label} in your path. {suggestion} Take 2 or 3 steps."
         elif dist < self.WARNING_DISTANCE:
-            return f"Caution, {label} ahead. {suggestion}"
+            return f"Caution. {label} ahead. {suggestion}"
         else:
-            return f"I see a {label} in your path about {dist:.0f} meters away. {suggestion}"
+            return f"{label} in your path, about {dist:.0f} meters. {suggestion}"
 
-    async def reason_with_gemini(self, detections: List[Dict[str, Any]], image_data: Any = None) -> str:
+    async def get_navigation_intent(self, user_text: str) -> Dict[str, Any]:
+        """
+        Use Gemini to parse user navigation intent with Regex fallback.
+        Example: "I want to go to room 0010" -> {"destination": "0010"}
+        """
+        # 1. Regex Fallback (Fast & Reliable for room numbers/labels)
+        import re
+        # Look for "room XXXX" or just "XXXX" where X is a digit
+        # Matches "room 0010", "0010", "room ten" (if digit provided)
+        room_match = re.search(r'room\s*(\w+)', user_text.lower())
+        if room_match:
+            dest = room_match.group(1)
+            # Basic validation: ensure it's either room_XXXX format or just XXXX
+            if dest.isdigit() or dest.startswith('00'):
+                return {"destination": dest}
+        
+        # General digit search (e.g., "go to 0010")
+        digits = re.findall(r'\b\d{4}\b', user_text) # Look for 4-digit room numbers
+        if digits:
+            return {"destination": digits[0]}
+
+        # 2. Gemini LLM Parsing
+        if not self.model:
+            return {"destination": None, "error": "Gemini not available"}
+
+        prompt = f"""
+        You are an indoor navigation assistant.
+        A user says: "{user_text}"
+        
+        Extract the destination room number or name.
+        Return ONLY a JSON object with a "destination" key.
+        If no destination is found, return {{"destination": null}}.
+        """
+        
+        try:
+            response = self.model.generate_content(prompt)
+            text = response.text.strip()
+            # Clean up potential markdown formatting
+            if "```" in text:
+                text = text.split("```")[1].replace("json", "").strip()
+            
+            import json
+            return json.loads(text)
+        except Exception as e:
+            print(f"⚠️ Intent parsing failed: {e}")
+            # Final fallback: if Gemini fails, try any digit sequence in text
+            any_digits = re.search(r'(\d+)', user_text)
+            if any_digits:
+                return {"destination": any_digits.group(1)}
+            return {"destination": None}
+
+    async def reason_with_gemini(self, detections: List[Dict[str, Any]], image_data: Any = None, navigation_context: str = "") -> str:
         """
         Use Gemini's MULTIMODAL capabilities (Vision + Text).
         Sends the actual image to the model for "human-like" scene understanding.
@@ -174,37 +225,37 @@ class ObstacleClassifier:
             context_str = "\n".join(scene_desc)
 
             prompt = f"""
-You are a friendly sighted guide walking with a blind friend. 
-I have detected these objects (approximate):
+You are a sighted guide speaking to a blind person. They will hear your words only (no screen).
+Navigation goal: {navigation_context}
+
+Detected objects (approximate distances):
 {context_str}
 
-Analyze the IMAGE + DATA to provide exact navigation.
+Look at the IMAGE and the data. Give ONE short verbal instruction to speak aloud.
 
-1. **Gap Analysis**: Is there space to the left or right of obstacles?
-2. **Instruction**: Give a compound command if needed (e.g., "Step 2 steps right to avoid the bag at 2m, then walk forward").
-3. **Be Specific**: Mention the obstacle you are avoiding.
-
-Rules:
-- Be concise (max 25 words).
-- If clear: "Path clear. Walk X steps."
-- If blocked but bypassable: "Step Left/Right X steps, then forward Y steps."
-- Stop only if completely blocked or dangerous (stairs/drop-offs).
+RULES:
+- Say exactly what to do: use "Take 2 steps left" or "Take 3 steps right" or "Step left to avoid the chair" etc. Give a number of steps when you can (1, 2, or 3 steps).
+- If the path is clear: say "Path is clear. Walk forward." or "Nothing in your way. Continue straight."
+- If something is in the way: say which way to move and how many steps, e.g. "There is a chair in front of you. Take 2 steps to your left, then continue."
+- Maximum 20 words. No "you may" or "I suggest" — give a direct command.
+- Do not mention the map, the screen, or anything visual. Only verbal directions.
 """
             try:
-                # Determine image format (assuming PIL Image or bytes)
                 content = [prompt, image_data]
                 response = self.model.generate_content(content)
                 return response.text.strip()
             except Exception as e:
                 print(f"⚠️ Gemini Visual reasoning failed: {e}")
-                # Fallback to bounding box logic if visual fails
         
-        # Fallback: Text-only reasoning using detection list
+        # Fallback: Text-only reasoning
         classified = self.classify_all(detections)
         relevant = [d for d in classified if d["distance"] < 5.0]
         
         if not relevant:
-            return "The path ahead is clear. You may proceed."
+            result = "The path ahead is clear."
+            if navigation_context:
+                result += f" {navigation_context}"
+            return result
             
         scene_desc = []
         for d in relevant:
@@ -214,7 +265,7 @@ Rules:
             scene_desc.append(f"- {label}: {pos}, {dist:.1f}m away")
             
         scene_text = "\n".join(scene_desc)
-        prompt_text = f"""Guiding a blind person. Scene objects:\n{scene_text}\n\nTask: Can they walk forward? Give strict command (Stop/Go/Turn). Max 15 words."""
+        prompt_text = f"You are speaking to a blind person. Goal: {navigation_context}\nScene:\n{scene_text}\n\nReply with one short verbal command: say 'Take X steps left' or 'Take X steps right' if blocked, or 'Path clear, walk forward' if clear. Max 15 words."
 
         try:
             response = self.model.generate_content(prompt_text)

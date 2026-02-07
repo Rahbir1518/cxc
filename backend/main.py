@@ -29,8 +29,22 @@ from services.detection import ObjectDetector, DetectedObject, get_detector
 from services.depth import DepthEstimator, get_depth_estimator
 from services.tts import generate_voice_and_track_cost
 from services.reasoning import ObstacleClassifier, get_classifier
+from services.pathfinding import get_pathfinder
 
 load_dotenv()
+
+
+def _make_json_serializable(obj):
+    """Convert numpy/scalar types to native Python for JSON."""
+    if hasattr(obj, "item"):
+        return obj.item()
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_serializable(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _make_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (np.floating, np.integer)):
+        return float(obj) if isinstance(obj, np.floating) else int(obj)
+    return obj
 
 
 # Pydantic models for API
@@ -42,6 +56,10 @@ class DetectionResponse(BaseModel):
 class AnnouncementRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None
+
+class NavigateRequest(BaseModel):
+    text: str  # User voice command text
+    start_room: str = "0020"  # Default start
 
 
 # Global model instances
@@ -196,8 +214,42 @@ async def announce_surroundings(request: AnnouncementRequest):
         raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
 
 
+@app.post("/navigate")
+async def navigate(request: NavigateRequest):
+    """
+    Parse navigation intent and return path.
+    """
+    classifier = get_classifier()
+    intent = await classifier.get_navigation_intent(request.text)
+    
+    destination = intent.get("destination")
+    if not destination:
+        return JSONResponse({
+            "error": "Could not identify destination room.",
+            "intent": intent
+        }, status_code=400)
+    
+    pathfinder = get_pathfinder()
+    path = pathfinder.find_path(request.start_room, destination)
+    
+    if not path:
+        return JSONResponse({
+            "error": f"Could not find a path to room {destination}.",
+            "destination": destination
+        }, status_code=404)
+    
+    return {
+        "destination": destination,
+        "path": path,
+        "instruction": f"Heading to room {destination}. I will tell you when to turn and when to watch for obstacles. Start walking forward and tap Announce anytime to hear what is in front of you."
+    }
+
+
 @app.post("/analyze-and-announce")
-async def analyze_and_announce(file: UploadFile = File(...)):
+async def analyze_and_announce(
+    file: UploadFile = File(...),
+    navigation_context: Optional[str] = ""
+):
     """
     Detect objects, calculate distances, and generate voice announcement.
     
@@ -235,18 +287,23 @@ async def analyze_and_announce(file: UploadFile = File(...)):
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_frame)
     
-    announcement = await classifier.reason_with_gemini(detection_dicts, image_data=pil_image)
+    announcement = await classifier.reason_with_gemini(
+        detection_dicts, 
+        image_data=pil_image,
+        navigation_context=navigation_context
+    )
     
     # Draw boxes
     annotated = detector.draw_detections(frame, detections)
     _, buffer = cv2.imencode('.jpg', annotated)
     frame_base64 = base64.b64encode(buffer).decode('utf-8')
     
-    # Classify detections for response
+    # Classify detections for response (ensure JSON-serializable, e.g. no numpy float32)
     classified = classifier.classify_all(detection_dicts)
+    objects_serializable = _make_json_serializable(classified)
     
     return JSONResponse({
-        "objects": classified,
+        "objects": objects_serializable,
         "frame_base64": frame_base64,
         "announcement": announcement,
     })
@@ -323,9 +380,9 @@ async def websocket_video(websocket: WebSocket):
             instruction = classifier.generate_navigation_instruction(detection_dicts)
             classified = classifier.classify_all(detection_dicts)
             
-            # Send response
+            # Send response (objects must be JSON-serializable, no numpy float32)
             await websocket.send_json({
-                "objects": classified,
+                "objects": _make_json_serializable(classified),
                 "frame_base64": frame_base64,
                 "instruction": instruction,
             })

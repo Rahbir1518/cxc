@@ -3,13 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Indoor Navigation - Camera Test</title>
+    <title>Indoor Navigation - Voice & Map</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -22,26 +18,70 @@
         
         header {
             background: #16213e;
-            padding: 1rem;
+            padding: 0.75rem 1rem;
             text-align: center;
         }
         
-        h1 {
-            font-size: 1.2rem;
-            margin-bottom: 0.5rem;
-        }
+        h1 { font-size: 1.1rem; margin-bottom: 0.25rem; }
         
-        #status {
-            font-size: 0.9rem;
-            color: #4ecca3;
-        }
+        #status { font-size: 0.85rem; color: #4ecca3; }
         
         .container {
             flex: 1;
             display: flex;
             flex-direction: column;
-            padding: 1rem;
-            gap: 1rem;
+            padding: 0.75rem;
+            gap: 0.75rem;
+        }
+        
+        .server-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .server-row input {
+            flex: 1;
+            padding: 0.6rem;
+            border: none;
+            border-radius: 8px;
+            background: #0f0f23;
+            color: white;
+            font-size: 0.95rem;
+        }
+        
+        .server-row button { padding: 0.6rem 1rem; }
+        
+        /* Map overlay - shown when navigating */
+        #mapContainer {
+            background: #0f0f23;
+            border-radius: 12px;
+            overflow: hidden;
+            width: 100%;
+            height: 220px;
+            position: relative;
+            display: none;
+            border: 2px solid #4ecca3;
+        }
+        
+        #mapContainer.visible { display: block; }
+        
+        #mapSvg {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .nav-overlay {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.85);
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #4ecca3;
         }
         
         .video-container {
@@ -50,152 +90,137 @@
             border-radius: 12px;
             overflow: hidden;
             flex: 1;
+            min-height: 220px;
         }
         
-        #videoElement {
+        #videoElement, #processedFrame {
+            position: absolute;
+            top: 0; left: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
-            display: none;
+        }
+        #videoElement { z-index: 0; }
+        #processedFrame { z-index: 1; background: #000; }
+        /* When show-video: only show raw video until first annotated frame arrives */
+        .video-container.show-video #processedFrame { opacity: 0; pointer-events: none; }
+        
+        .voice-prompt {
+            text-align: center;
+            padding: 0.5rem;
+            background: #16213e;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            color: #a0a0c0;
         }
         
-        #processedFrame {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
+        .voice-prompt strong { color: #4ecca3; }
         
         .controls {
             display: flex;
-            gap: 1rem;
+            gap: 0.75rem;
             justify-content: center;
             flex-wrap: wrap;
         }
         
         button {
-            padding: 1rem 2rem;
-            font-size: 1rem;
+            padding: 0.9rem 1.5rem;
+            font-size: 0.95rem;
             font-weight: 600;
             border: none;
             border-radius: 50px;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
         
-        #startBtn {
-            background: linear-gradient(135deg, #4ecca3, #38a3a5);
-            color: #1a1a2e;
-        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:active:not(:disabled) { transform: scale(0.97); }
         
-        #stopBtn {
-            background: #e74c3c;
+        #connectBtn { background: #4ecca3; color: #1a1a2e; }
+        #startBtn { background: linear-gradient(135deg, #4ecca3, #38a3a5); color: #1a1a2e; }
+        #stopBtn { background: #e74c3c; color: white; }
+        #voiceNavBtn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
             color: white;
         }
+        #voiceNavBtn.active-nav { box-shadow: 0 0 16px rgba(240, 147, 251, 0.6); }
         
-        #announceBtn {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+        .manual-row {
+            display: none;
+            gap: 0.5rem;
+            width: 100%;
+        }
+        .manual-row.visible { display: flex; }
+        .manual-row input {
+            flex: 1;
+            padding: 0.6rem;
+            border-radius: 8px;
+            background: #2a2a4e;
             color: white;
-        }
-        
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        
-        button:active:not(:disabled) {
-            transform: scale(0.95);
+            border: 1px solid #4ecca3;
         }
         
         .info-panel {
             background: #16213e;
-            border-radius: 12px;
-            padding: 1rem;
-            max-height: 150px;
+            border-radius: 10px;
+            padding: 0.75rem;
+            max-height: 120px;
             overflow-y: auto;
         }
-        
-        .info-panel h2 {
-            font-size: 1rem;
-            margin-bottom: 0.5rem;
-            color: #4ecca3;
-        }
-        
-        #detectionList {
-            font-size: 0.9rem;
-            line-height: 1.6;
-        }
-        
-        .detection-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 0.25rem 0;
-            border-bottom: 1px solid #2a2a4e;
-        }
-        
-        .distance-close {
-            color: #e74c3c;
-        }
-        
-        .distance-medium {
-            color: #f39c12;
-        }
-        
-        .distance-far {
-            color: #4ecca3;
-        }
-        
-        .server-input {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        
-        .server-input input {
-            flex: 1;
-            padding: 0.75rem;
-            border: none;
-            border-radius: 8px;
-            background: #0f0f23;
-            color: white;
-            font-size: 1rem;
-        }
-        
-        .server-input button {
-            padding: 0.75rem 1rem;
-        }
+        .info-panel h2 { font-size: 0.9rem; margin-bottom: 0.35rem; color: #4ecca3; }
+        #detectionList { font-size: 0.85rem; line-height: 1.5; }
+        .detection-item { display: flex; justify-content: space-between; padding: 0.2rem 0; border-bottom: 1px solid #2a2a4e; }
+        .distance-close { color: #e74c3c; }
+        .distance-medium { color: #f39c12; }
+        .distance-far { color: #4ecca3; }
     </style>
 </head>
 <body>
     <header>
-        <h1>🔍 Indoor Navigation Camera</h1>
-        <div id="status">Enter server address to connect</div>
+        <h1>🧭 Voice Navigation (Room 0020 → destination)</h1>
+        <div id="status">Enter server address and connect</div>
     </header>
     
     <div class="container">
-        <div class="server-input">
-            <input type="text" id="serverUrl" placeholder="Server IP (e.g., 192.168.1.100:8000)" value="">
+        <div class="server-row">
+            <input type="text" id="serverUrl" placeholder="Server (e.g. 192.168.1.100:8000)" value="">
             <button id="connectBtn">Connect</button>
         </div>
         
-        <div class="video-container">
-            <video id="videoElement" autoplay playsinline></video>
-            <img id="processedFrame" alt="Processed camera feed">
+        <div id="mapContainer">
+            <div class="nav-overlay" id="navInfo">Destination: —</div>
+            <object id="mapSvg" type="image/svg+xml"></object>
         </div>
         
-        <div class="info-panel">
-            <h2>Detected Objects</h2>
-            <div id="detectionList">No detections yet. Start the camera to begin.</div>
+        <p class="voice-prompt" style="margin-bottom:0;">Camera — you’ll hear what’s in the way when you tap Announce.</p>
+        <div id="videoContainer" class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <img id="processedFrame" alt="Camera with object boxes when connected">
+        </div>
+        
+        <div id="voicePrompt" class="voice-prompt">
+            After connecting, tap <strong>Start</strong> then say: <strong>"Take me to room 0010"</strong>
         </div>
         
         <div class="controls">
-            <button id="startBtn" disabled>📷 Start Camera</button>
-            <button id="stopBtn" disabled>⏹️ Stop</button>
+            <button id="startBtn" disabled>📷 Start</button>
+            <button id="stopBtn" disabled>⏹ Stop</button>
             <button id="announceBtn" disabled>🔊 Announce</button>
+            <button id="voiceNavBtn" disabled>🎤 Say destination</button>
+        </div>
+        
+        <div id="manualEntry" class="manual-row">
+            <input type="text" id="manualDest" placeholder="Room (e.g. 0010)">
+            <button id="goBtn" style="padding: 0.6rem 1rem; background: #4ecca3; color: #1a1a2e; border-radius: 8px;">Go</button>
+        </div>
+        
+        <div class="info-panel">
+            <h2>Detected objects</h2>
+            <div id="detectionList">Start camera to see detections.</div>
         </div>
     </div>
     
     <script>
-        // DOM elements
         const serverUrlInput = document.getElementById('serverUrl');
         const connectBtn = document.getElementById('connectBtn');
         const statusEl = document.getElementById('status');
@@ -203,323 +228,379 @@
         const processedFrame = document.getElementById('processedFrame');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const announceBtn = document.getElementById('announceBtn');
+        const voiceNavBtn = document.getElementById('voiceNavBtn');
+        const mapContainer = document.getElementById('mapContainer');
+        const mapSvg = document.getElementById('mapSvg');
+        const navInfo = document.getElementById('navInfo');
         const detectionList = document.getElementById('detectionList');
+        const voicePrompt = document.getElementById('voicePrompt');
+        const manualEntry = document.getElementById('manualEntry');
+        const videoContainer = document.getElementById('videoContainer');
+        const announceBtn = document.getElementById('announceBtn');
         
-        // State
+        const START_ROOM = '0020';
+        
         let serverUrl = '';
         let ws = null;
         let stream = null;
         let isProcessing = false;
         let lastDetections = [];
-        let lastInstruction = 'The path ahead appears clear.';
+        let lastSpokenAnnouncement = '';
         
-        // Connect to server
+        let isNavigating = false;
+        let navPath = [];
+        let navDestination = null;
+        let guidanceInterval = null;
+        let recognition = null;
+        
+        function setMapSvgSource() {
+            if (serverUrl && mapSvg) {
+                mapSvg.data = serverUrl + '/static/floor_plans/basement.svg';
+            }
+        }
+        
         connectBtn.addEventListener('click', () => {
-            serverUrl = serverUrlInput.value.trim();
-            if (!serverUrl) {
-                alert('Please enter server address');
-                return;
-            }
+            let url = serverUrlInput.value.trim();
+            if (!url) { alert('Enter server address'); return; }
+            if (!url.startsWith('http')) url = 'http://' + url;
+            serverUrl = url;
             
-            // Add protocol if missing
-            if (!serverUrl.startsWith('http')) {
-                serverUrl = 'http://' + serverUrl;
-            }
-            
-            // Test connection
             fetch(`${serverUrl}/health`)
                 .then(res => res.json())
-                .then(data => {
-                    statusEl.textContent = `✓ Connected to ${serverUrl}`;
+                .then(() => {
+                    statusEl.textContent = `✓ Connected`;
                     statusEl.style.color = '#4ecca3';
                     startBtn.disabled = false;
+                    voiceNavBtn.disabled = false;
+                    setMapSvgSource();
                 })
                 .catch(err => {
-                    statusEl.textContent = `✗ Failed to connect: ${err.message}`;
+                    statusEl.textContent = `✗ ${err.message}`;
                     statusEl.style.color = '#e74c3c';
                 });
         });
         
-        // Start camera
         startBtn.addEventListener('click', async () => {
             try {
-                // Check if we are in a secure context
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    const isHttps = window.location.protocol === 'https:';
-                    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                    
-                    let errorMsg = '📷 Camera API (getUserMedia) is not available.';
-                    if (!isHttps && !isLocalhost) {
-                        errorMsg += '\n\nReason: Browsers only allow camera access on HTTPS or "localhost". Accessing via IP (http://10.x.x.x) is considered insecure.';
-                        errorMsg += '\n\nSolution: Use an HTTPS tunnel like ngrok or check browser flags to allow this IP.';
-                    }
-                    
-                    alert(errorMsg);
-                    statusEl.textContent = 'Error: Secure context required for camera';
-                    statusEl.style.color = '#e74c3c';
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    alert('Camera not available. Use HTTPS or localhost.');
                     return;
                 }
-
-                // Request camera with back camera preference
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    },
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } },
                     audio: false
                 });
-                
                 videoEl.srcObject = stream;
                 await videoEl.play();
-                
-                statusEl.textContent = '📷 Camera active - processing...';
+                statusEl.textContent = '📷 Camera on — say your destination';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 announceBtn.disabled = false;
-                
-                // Start WebSocket connection
+                videoContainer.classList.add('show-video');
+                voicePrompt.textContent = 'Tap "Say destination" and say: "Take me to room 0010" (or type below). Tap Announce to hear what is in front of you.';
                 connectWebSocket();
-                
             } catch (err) {
-                statusEl.textContent = `Camera error: ${err.message}`;
+                statusEl.textContent = `Camera: ${err.message}`;
                 statusEl.style.color = '#e74c3c';
             }
         });
         
-        // Stop camera
         stopBtn.addEventListener('click', () => {
-            stopProcessing();
-        });
-        
-        function stopProcessing() {
+            stopNavigation();
+            if (guidanceInterval) { clearInterval(guidanceInterval); guidanceInterval = null; }
             isProcessing = false;
-            
-            if (ws) {
-                ws.close();
-                ws = null;
-            }
-            
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-            
-            statusEl.textContent = 'Camera stopped';
+            if (ws) { ws.close(); ws = null; }
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            statusEl.textContent = 'Stopped';
             startBtn.disabled = false;
             stopBtn.disabled = true;
             announceBtn.disabled = true;
-        }
+            mapContainer.classList.remove('visible');
+        });
         
-        // WebSocket connection for real-time processing
         function connectWebSocket() {
             const wsUrl = serverUrl.replace('http', 'ws') + '/ws/video';
-            
             ws = new WebSocket(wsUrl);
-            
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                isProcessing = true;
-                sendFrame();
-            };
-            
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                
-                if (data.error) {
-                    console.error('Server error:', data.error);
-                    return;
-                }
-                
-                // Update processed frame
+            ws.onopen = () => { isProcessing = true; sendFrame(); };
+            ws.onmessage = (ev) => {
+                const data = JSON.parse(ev.data);
+                if (data.error) return;
                 if (data.frame_base64) {
                     processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
+                    videoContainer.classList.remove('show-video');
                 }
-                
-                // Update detections list
-                if (data.objects) {
-                    lastDetections = data.objects;
-                    updateDetectionsList(data.objects);
-                }
-                
-                // Store the server's instruction
-                if (data.instruction) {
-                    lastInstruction = data.instruction;
-                }
-                
-                // Send next frame
-                if (isProcessing) {
-                    setTimeout(sendFrame, 100); // ~10 FPS
-                }
+                if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
+                if (data.instruction) lastSpokenAnnouncement = data.instruction;
+                if (isProcessing) setTimeout(sendFrame, 100);
             };
-            
-            ws.onerror = (err) => {
-                console.error('WebSocket error:', err);
-                statusEl.textContent = 'WebSocket error';
-                statusEl.style.color = '#e74c3c';
-            };
-            
-            ws.onclose = () => {
-                console.log('WebSocket closed');
-                if (isProcessing) {
-                    statusEl.textContent = 'Connection lost, reconnecting...';
-                    setTimeout(connectWebSocket, 2000);
-                }
-            };
+            ws.onerror = () => { statusEl.textContent = 'WebSocket error'; statusEl.style.color = '#e74c3c'; };
+            ws.onclose = () => { if (isProcessing) setTimeout(connectWebSocket, 2000); };
         }
         
-        // Capture and send frame
         function sendFrame() {
-            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) {
-                return;
-            }
-            
-            // Create canvas to capture frame
+            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
             const canvas = document.createElement('canvas');
             canvas.width = videoEl.videoWidth;
             canvas.height = videoEl.videoHeight;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(videoEl, 0, 0);
-            
-            // Convert to base64 JPEG
-            canvas.toBlob((blob) => {
+            canvas.getContext('2d').drawImage(videoEl, 0, 0);
+            canvas.toBlob(blob => {
                 const reader = new FileReader();
-                reader.onload = () => {
-                    // Send just the base64 data (without the data URL prefix)
-                    const base64 = reader.result.split(',')[1];
-                    ws.send(base64);
-                };
+                reader.onload = () => ws.send(reader.result.split(',')[1]);
                 reader.readAsDataURL(blob);
             }, 'image/jpeg', 0.7);
         }
         
-        // Update detections list UI
-        function updateDetectionsList(objects) {
-            if (!objects || objects.length === 0) {
-                detectionList.innerHTML = '<em>Path appears clear</em>';
-                return;
-            }
-            
-            // Sort by distance
-            objects.sort((a, b) => (a.distance || 999) - (b.distance || 999));
-            
-            detectionList.innerHTML = objects.map(obj => {
-                let distanceClass = 'distance-far';
-                let distanceText = 'unknown';
-                
-                if (obj.distance !== null) {
-                    if (obj.distance < 1) {
-                        distanceClass = 'distance-close';
-                        distanceText = `${obj.distance.toFixed(1)}m ⚠️`;
-                    } else if (obj.distance < 2) {
-                        distanceClass = 'distance-medium';
-                        distanceText = `${obj.distance.toFixed(1)}m`;
-                    } else {
-                        distanceText = `${obj.distance.toFixed(1)}m`;
-                    }
-                }
-                
-                return `
-                    <div class="detection-item">
-                        <span>${obj.label}</span>
-                        <span class="${distanceClass}">${distanceText}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-        
-        // Announce button - use server instruction
-        // Announce button - use SMART visual reasoning
         announceBtn.addEventListener('click', async () => {
-            // Disable button during processing
+            if (!videoEl.videoWidth || !serverUrl) return;
             announceBtn.disabled = true;
-            statusEl.textContent = '🧠 Analyzing scene...';
-            
+            statusEl.textContent = 'Analyzing scene…';
             try {
-                // 1. Capture current frame as Blob (Optimized for Speed)
                 const canvas = document.createElement('canvas');
-                // Scale down to max 640 width for faster upload/processing
                 const scale = Math.min(1, 640 / videoEl.videoWidth);
                 canvas.width = videoEl.videoWidth * scale;
                 canvas.height = videoEl.videoHeight * scale;
-                
                 canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-                
-                // Lower quality to 0.6 for smaller payload
-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.6));
-                
-                // 2. Send to server for Deep Reasoning
-                const formData = new FormData();
-                formData.append('file', blob, 'scene.jpg');
-                
-                const response = await fetch(`${serverUrl}/analyze-and-announce`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`Server returned ${response.status}`);
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+                const form = new FormData();
+                form.append('file', blob, 'scene.jpg');
+                if (isNavigating && navDestination) form.append('navigation_context', 'User is heading to room ' + navDestination + '. Give verbal directions: say how many steps left or right if something is in the way.');
+                const res = await fetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
+                if (!res.ok) throw new Error('Server ' + res.status);
+                const data = await res.json();
+                const announcement = (data.announcement || "I couldn't analyze the scene.").trim();
+                if (data.frame_base64) {
+                    processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
+                    videoContainer.classList.remove('show-video');
                 }
-                
-                const data = await response.json();
-                const announcement = data.announcement || "I couldn't analyze the scene.";
-                
-                statusEl.textContent = '🗣️ Speaking: ' + announcement;
-                
-                // 3. Play audio or use browser TTS
-                // Note: The endpoint returns JSON, not audio directly. 
-                // We should add a TTS call or just use browser TTS for speed/reliability.
-                speak(announcement);
-                
+                statusEl.textContent = 'Speaking…';
+                await speakWithElevenLabs(announcement);
+                lastSpokenAnnouncement = announcement;
             } catch (err) {
-                console.error('Analysis error:', err);
                 statusEl.textContent = 'Error: ' + err.message;
-                // Fallback to local logic
-                speak(lastInstruction || "I'm having trouble connecting.");
-            } finally {
-                announceBtn.disabled = false;
-                setTimeout(() => {
-                    if (isProcessing) statusEl.textContent = '📷 Camera active - processing...';
-                }, 3000);
+                speak(lastSpokenAnnouncement || "Something went wrong. Check the server.");
             }
+            announceBtn.disabled = false;
+            if (isProcessing) statusEl.textContent = 'Camera on — tap Announce again for directions';
         });
         
-        // Generate announcement text
-        function generateAnnouncement(objects) {
-            const nearby = objects
-                .filter(o => o.distance && o.distance < 5)
-                .sort((a, b) => a.distance - b.distance)
-                .slice(0, 3);
-            
-            if (nearby.length === 0) {
-                return 'The path ahead appears clear.';
-            }
-            
-            const parts = nearby.map(o => {
-                const dist = o.distance < 1 ? 'very close' : `${o.distance.toFixed(1)} meters`;
-                return `${o.label} at ${dist}`;
-            });
-            
-            return 'Nearby: ' + parts.join(', ') + '.';
+        function updateDetectionsList(objects) {
+            if (!objects?.length) { detectionList.innerHTML = '<em>Path clear</em>'; return; }
+            objects.sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+            detectionList.innerHTML = objects.map(obj => {
+                const d = obj.distance;
+                let cls = 'distance-far', text = '—';
+                if (d != null) {
+                    if (d < 1) { cls = 'distance-close'; text = d.toFixed(1) + 'm ⚠'; }
+                    else if (d < 2) { cls = 'distance-medium'; text = d.toFixed(1) + 'm'; }
+                    else text = d.toFixed(1) + 'm';
+                }
+                return `<div class="detection-item"><span>${obj.label}</span><span class="${cls}">${text}</span></div>`;
+            }).join('');
         }
         
-        // Browser TTS fallback
         function speak(text) {
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 0.9;
-            speechSynthesis.speak(utterance);
+            if (!text) return;
+            lastSpokenAnnouncement = text;
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 0.9;
+            speechSynthesis.speak(u);
         }
         
-        // Auto-detect local server
+        async function speakWithElevenLabs(text) {
+            if (!text) return;
+            try {
+                const res = await fetch(serverUrl + '/announce', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                if (!res.ok) throw new Error(res.status);
+                const blob = await res.blob();
+                if (!blob || blob.size === 0) throw new Error('No audio');
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio.onended = () => URL.revokeObjectURL(url);
+                audio.onerror = () => { URL.revokeObjectURL(url); speak(text); };
+                await audio.play();
+            } catch (e) {
+                console.warn('ElevenLabs fallback to TTS:', e);
+                speak(text);
+            }
+        }
+        
+        voiceNavBtn.addEventListener('click', () => {
+            if (isNavigating) { stopNavigation(); return; }
+            startVoiceRecognition();
+        });
+        
+        function startVoiceRecognition() {
+            const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SR) {
+                manualEntry.classList.add('visible');
+                statusEl.textContent = 'Voice not supported — type room above';
+                return;
+            }
+            recognition = new SR();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+            recognition.onstart = () => {
+                statusEl.textContent = '🎤 Listening…';
+                voiceNavBtn.textContent = '🛑 Cancel';
+                voiceNavBtn.classList.add('active-nav');
+            };
+            recognition.onresult = (ev) => {
+                const cmd = ev.results[0][0].transcript;
+                statusEl.textContent = `Heard: "${cmd}"`;
+                parseNavigationCommand(cmd);
+            };
+            recognition.onerror = () => {
+                statusEl.textContent = 'Try again or type room number';
+                manualEntry.classList.add('visible');
+                resetVoiceBtn();
+            };
+            recognition.onend = () => resetVoiceBtn();
+            recognition.start();
+        }
+        
+        function resetVoiceBtn() {
+            voiceNavBtn.textContent = '🎤 Say destination';
+            voiceNavBtn.classList.remove('active-nav');
+        }
+        
+        document.getElementById('goBtn').addEventListener('click', () => {
+            const dest = document.getElementById('manualDest').value.trim();
+            if (dest) parseNavigationCommand('go to room ' + dest);
+        });
+        
+        async function parseNavigationCommand(text) {
+            statusEl.textContent = 'Finding route…';
+            try {
+                const res = await fetch(`${serverUrl}/navigate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, start_room: START_ROOM })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'No path');
+                startNavigation(data);
+            } catch (err) {
+                statusEl.textContent = '❌ ' + err.message;
+                speak(err.message);
+                manualEntry.classList.add('visible');
+            }
+        }
+        
+        function startNavigation(data) {
+            isNavigating = true;
+            navPath = data.path || [];
+            navDestination = data.destination || '?';
+            
+            navInfo.textContent = 'Destination: Room ' + navDestination;
+            if (serverUrl && !mapSvg.data) mapSvg.data = serverUrl + '/static/floor_plans/basement.svg';
+            mapContainer.classList.add('visible');
+            voiceNavBtn.textContent = '🛑 Stop nav';
+            voiceNavBtn.classList.add('active-nav');
+            statusEl.textContent = '🧭 Navigating to room ' + navDestination;
+            
+            speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will tell you when to turn and when to watch for obstacles. Tap Announce to hear what is in front of you.`);
+            drawPathOnMap(navPath);
+            
+            startDynamicGuidance();
+        }
+        
+        function stopNavigation() {
+            isNavigating = false;
+            if (guidanceInterval) { clearInterval(guidanceInterval); guidanceInterval = null; }
+            mapContainer.classList.remove('visible');
+            resetVoiceBtn();
+            statusEl.textContent = 'Navigation stopped';
+            speak('Navigation stopped.');
+        }
+        
+        function drawPathOnMap(path) {
+            if (!path?.length) return;
+            
+            function draw() {
+                const doc = mapSvg.contentDocument;
+                if (!doc) {
+                    mapSvg.onload = () => { mapSvg.onload = null; draw(); };
+                    setTimeout(draw, 400);
+                    return;
+                }
+                const svg = doc.documentElement || doc.querySelector('svg');
+                if (!svg) return;
+                
+                const ns = 'http://www.w3.org/2000/svg';
+                const oldGroup = doc.getElementById('navRouteGroup');
+                if (oldGroup) oldGroup.remove();
+                
+                const g = doc.createElementNS(ns, 'g');
+                g.setAttribute('id', 'navRouteGroup');
+                
+                const poly = doc.createElementNS(ns, 'polyline');
+                poly.setAttribute('points', path.map(p => `${p.x},${p.y}`).join(' '));
+                poly.setAttribute('stroke', '#007bff');
+                poly.setAttribute('stroke-width', '12');
+                poly.setAttribute('fill', 'none');
+                poly.setAttribute('stroke-linecap', 'round');
+                poly.setAttribute('stroke-linejoin', 'round');
+                poly.setAttribute('opacity', '0.95');
+                g.appendChild(poly);
+                
+                path.forEach((p, i) => {
+                    const circle = doc.createElementNS(ns, 'circle');
+                    circle.setAttribute('cx', p.x);
+                    circle.setAttribute('cy', p.y);
+                    circle.setAttribute('r', '14');
+                    circle.setAttribute('fill', '#007bff');
+                    circle.setAttribute('stroke', '#fff');
+                    circle.setAttribute('stroke-width', '4');
+                    circle.setAttribute('opacity', '0.95');
+                    g.appendChild(circle);
+                });
+                
+                svg.appendChild(g);
+            }
+            draw();
+        }
+        
+        function startDynamicGuidance() {
+            if (guidanceInterval) return;
+            const navContext = `User is heading to room ${navDestination}. Give one short instruction.`;
+            
+            guidanceInterval = setInterval(async () => {
+                if (!isNavigating || !isProcessing || !videoEl.videoWidth) return;
+                try {
+                    const canvas = document.createElement('canvas');
+                    const scale = Math.min(1, 640 / videoEl.videoWidth);
+                    canvas.width = videoEl.videoWidth * scale;
+                    canvas.height = videoEl.videoHeight * scale;
+                    canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                    const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+                    const form = new FormData();
+                    form.append('file', blob, 'scene.jpg');
+                    form.append('navigation_context', navContext);
+                    
+                    const res = await fetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
+                    const data = await res.json();
+                    const announcement = data.announcement;
+                    if (announcement) {
+                        statusEl.textContent = '🗣️ ' + announcement.slice(0, 40) + '…';
+                        await speakWithElevenLabs(announcement);
+                    }
+                } catch (e) { console.warn('Guidance:', e); }
+            }, 5000);
+        }
+        
         window.addEventListener('load', () => {
-            // Try common local addresses
-            const hostname = window.location.hostname;
-            if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-                serverUrlInput.value = hostname + ':8000';
-            } else {
-                serverUrlInput.value = 'localhost:8000';
+            const host = window.location.hostname;
+            const port = window.location.port;
+            if (host !== 'localhost' && host !== '127.0.0.1') serverUrlInput.value = host + ':8000';
+            else serverUrlInput.value = 'localhost:8000';
+            if (port === '8000' || window.location.origin.includes('8000')) {
+                serverUrl = window.location.origin;
+                setMapSvgSource();
             }
         });
     </script>
