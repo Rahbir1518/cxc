@@ -9,6 +9,7 @@ Provides endpoints for:
 
 import os
 import io
+import time
 import base64
 import asyncio
 from PIL import Image
@@ -335,24 +336,49 @@ async def websocket_video(websocket: WebSocket):
     Client sends: base64-encoded JPEG frames
     Server sends: JSON with detections + annotated frame base64
     
-    Performance: Depth estimation runs every Nth frame to reduce latency.
+    Performance optimizations:
+    - Frame dropping: only processes the latest frame, discards stale queued frames
+    - Tiered processing: depth/annotations run at lower frequency than detection
+    - Response caching: instruction text cached when detections are stable
     """
     await manager.connect(websocket)
     
-    # Frame skipping for performance
-    frame_count = 0
-    depth_skip_frames = 5  # Run depth estimation every 5th frame
-    cached_depth_map = None
+    # ── Tunable skip intervals ──
+    DEPTH_EVERY_N       = 10   # Depth estimation every Nth processed frame
+    ANNOTATE_EVERY_N    = 3    # Draw bounding-box image every Nth frame
+    INSTRUCTION_EVERY_N = 8    # Regenerate instruction text every Nth frame
+    DEPTH_MAX_AGE_S     = 4.0  # Force depth refresh if older than this (seconds)
+    
+    # ── Per-connection caches ──
+    frame_count         = 0
+    cached_depth_map    = None
+    cached_frame_b64    = None   # Last annotated frame as base64
+    cached_instruction  = ""     # Last navigation instruction
+    cached_classified   = []     # Last classified objects list
+    cached_label_set    = set()  # Labels from last instruction gen (change detection)
+    last_depth_time     = 0.0    # Timestamp of last depth calculation
     
     try:
         while True:
-            # Receive frame as base64 string
+            # ── 1. FRAME DROPPING: drain queue, keep only latest ──
             data = await websocket.receive_text()
             
-            # Decode base64 to image
+            # Non-blocking drain: if more frames queued, skip to newest
+            dropped = 0
+            while True:
+                try:
+                    newer = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=0.001
+                    )
+                    data = newer
+                    dropped += 1
+                except asyncio.TimeoutError:
+                    break
+            
+            # ── 2. Decode frame ──
             try:
-                image_data = base64.b64decode(data)
-                nparr = np.frombuffer(image_data, np.uint8)
+                image_bytes = base64.b64decode(data)
+                nparr = np.frombuffer(image_bytes, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             except Exception as e:
                 await websocket.send_json({"error": f"Invalid frame: {e}"})
@@ -363,43 +389,74 @@ async def websocket_video(websocket: WebSocket):
                 continue
             
             frame_count += 1
+            now = time.monotonic()
             
-            # Detect objects (fast with YOLOv8n)
+            # ── 3. TIER 0 — Detection (every frame, fast ~30-50ms) ──
             detections = detector.detect(frame) if detector else []
-            
-            # Estimate distances - ONLY every Nth frame for performance
-            if depth_estimator is not None and detections:
-                if frame_count % depth_skip_frames == 0 or cached_depth_map is None:
-                    # Recalculate depth map
-                    cached_depth_map, _ = depth_estimator.estimate(frame)
-                
-                # Use cached or fresh depth map
-                if cached_depth_map is not None:
-                    for det in detections:
-                        det.distance = depth_estimator.get_distance_for_bbox(cached_depth_map, det.bbox)
-            
-            # Draw annotations
-            if detections:
-                annotated = detector.draw_detections(frame, detections)
-            else:
-                annotated = frame
-            
-            # Encode annotated frame with lower quality for speed
-            _, buffer = cv2.imencode('.jpg', annotated, [cv2.IMWRITE_JPEG_QUALITY, 50])
-            frame_base64 = base64.b64encode(buffer).decode('utf-8')
-            
-            # Generate navigation instruction
-            classifier = get_classifier()
             detection_dicts = [det.to_dict() for det in detections]
-            instruction = classifier.generate_navigation_instruction(detection_dicts)
-            classified = classifier.classify_all(detection_dicts)
             
-            # Send response (objects must be JSON-serializable)
-            await websocket.send_json({
-                "objects": _make_json_serializable(classified),
-                "frame_base64": frame_base64,
-                "instruction": instruction,
-            })
+            # ── 4. TIER 1 — Depth estimation (every Nth frame or stale) ──
+            depth_stale = (now - last_depth_time) > DEPTH_MAX_AGE_S
+            run_depth = (
+                depth_estimator is not None
+                and detections
+                and (frame_count % DEPTH_EVERY_N == 0
+                     or cached_depth_map is None
+                     or depth_stale)
+            )
+            
+            if run_depth:
+                cached_depth_map, _ = depth_estimator.estimate(frame)
+                last_depth_time = now
+            
+            # Apply cached depth distances (fast lookup, ~<1ms)
+            if cached_depth_map is not None and detections:
+                for det in detections:
+                    det.distance = depth_estimator.get_distance_for_bbox(
+                        cached_depth_map, det.bbox
+                    )
+                # Refresh dicts with distances
+                detection_dicts = [det.to_dict() for det in detections]
+            
+            # ── 5. TIER 2 — Classification (cheap, every frame) ──
+            classifier = get_classifier()
+            classified = classifier.classify_all(detection_dicts)
+            cached_classified = classified
+            
+            # ── 6. TIER 3 — Annotated frame (every Nth frame) ──
+            if frame_count % ANNOTATE_EVERY_N == 0:
+                if detections:
+                    annotated = detector.draw_detections(frame, detections)
+                else:
+                    annotated = frame
+                _, buffer = cv2.imencode(
+                    '.jpg', annotated,
+                    [cv2.IMWRITE_JPEG_QUALITY, 40]  # Lower quality = faster encode + smaller payload
+                )
+                cached_frame_b64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # ── 7. TIER 4 — Navigation instruction (every Nth, or on label change) ──
+            current_labels = frozenset(d.get("label", "") for d in classified)
+            labels_changed = current_labels != cached_label_set
+            
+            if (frame_count % INSTRUCTION_EVERY_N == 0
+                    or labels_changed
+                    or not cached_instruction):
+                cached_instruction = classifier.generate_navigation_instruction(
+                    detection_dicts
+                )
+                cached_label_set = current_labels
+            
+            # ── 8. Build & send response ──
+            response: dict = {
+                "objects": _make_json_serializable(cached_classified),
+                "instruction": cached_instruction,
+            }
+            # Only include the (large) frame payload when we have a fresh one
+            if cached_frame_b64 and frame_count % ANNOTATE_EVERY_N == 0:
+                response["frame_base64"] = cached_frame_b64
+            
+            await websocket.send_json(response)
             
     except WebSocketDisconnect:
         manager.disconnect(websocket)

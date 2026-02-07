@@ -20,6 +20,10 @@ interface CameraStreamProps {
   onFrame?: (frameBase64: string) => void;
   className?: string;
   autoStart?: boolean;
+  /** Target send width in px (lower = faster). Default 240 */
+  sendWidth?: number;
+  /** JPEG quality 0-1 for sent frames. Default 0.4 */
+  sendQuality?: number;
 }
 
 export function CameraStream({
@@ -29,6 +33,8 @@ export function CameraStream({
   onFrame,
   className = "",
   autoStart = false,
+  sendWidth = 240,
+  sendQuality = 0.4,
 }: CameraStreamProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,6 +43,18 @@ export function CameraStream({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [processedFrame, setProcessedFrame] = useState<string | null>(null);
+
+  // ── Backpressure & adaptive rate ──
+  const awaitingResponseRef = useRef(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const adaptiveIntervalRef = useRef(200); // ms between sends, starts at 200
+  const lastRTTRef = useRef(200);          // last round-trip time in ms
+  const sendTimestampRef = useRef(0);
+
+  // ── FPS counter for debug ──
+  const [fps, setFps] = useState(0);
+  const fpsCounterRef = useRef(0);
+  const fpsTimerRef = useRef(0);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
@@ -54,8 +72,33 @@ export function CameraStream({
       const data = JSON.parse(event.data);
       if (data.error) {
         setError(data.error);
+        awaitingResponseRef.current = false;
         return;
       }
+
+      // Measure RTT for adaptive rate
+      const rtt = Date.now() - sendTimestampRef.current;
+      lastRTTRef.current = rtt;
+
+      // Adaptive interval: target ~60% utilization
+      // If server responds in 50ms, we can send every ~80ms
+      // If server responds in 300ms, back off to ~500ms
+      adaptiveIntervalRef.current = Math.max(
+        80,
+        Math.min(800, Math.round(rtt * 1.6))
+      );
+
+      // FPS tracking
+      fpsCounterRef.current++;
+      const now = Date.now();
+      if (now - fpsTimerRef.current >= 1000) {
+        setFps(fpsCounterRef.current);
+        fpsCounterRef.current = 0;
+        fpsTimerRef.current = now;
+      }
+
+      // Only update displayed frame if server sent one (frame skipping means
+      // not every response includes frame_base64)
       if (data.frame_base64) {
         setProcessedFrame(`data:image/jpeg;base64,${data.frame_base64}`);
         onFrame?.(data.frame_base64);
@@ -66,15 +109,20 @@ export function CameraStream({
       if (data.instruction) {
         onInstruction?.(data.instruction);
       }
+
+      // Release backpressure — allow next send
+      awaitingResponseRef.current = false;
     };
 
     ws.onerror = () => {
       setError("WebSocket connection error");
       setIsConnected(false);
+      awaitingResponseRef.current = false;
     };
 
     ws.onclose = () => {
       setIsConnected(false);
+      awaitingResponseRef.current = false;
     };
 
     wsRef.current = ws;
@@ -84,7 +132,11 @@ export function CameraStream({
   const startStreaming = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: 640, height: 480 },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
         audio: false,
       });
 
@@ -96,6 +148,7 @@ export function CameraStream({
       connect();
       setIsStreaming(true);
       setError(null);
+      fpsTimerRef.current = Date.now();
     } catch (err) {
       setError(`Camera error: ${err}`);
     }
@@ -110,12 +163,17 @@ export function CameraStream({
       videoRef.current.srcObject = null;
     }
     wsRef.current?.close();
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     setIsStreaming(false);
     setIsConnected(false);
     setProcessedFrame(null);
+    awaitingResponseRef.current = false;
   }, []);
 
-  // Send frames to server
+  // ── Frame sender with backpressure + adaptive rate ──
   useEffect(() => {
     if (!isStreaming || !isConnected) return;
 
@@ -126,40 +184,61 @@ export function CameraStream({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    let animationId: number;
-    let lastSendTime = 0;
-    const minInterval = 100; // 10 FPS max
+    // Pre-size the reusable canvas once
+    const scale = sendWidth / (video.videoWidth || 640);
+    canvas.width = sendWidth;
+    canvas.height = Math.round((video.videoHeight || 480) * scale);
 
-    const sendFrame = (timestamp: number) => {
-      if (timestamp - lastSendTime >= minInterval && wsRef.current?.readyState === WebSocket.OPEN) {
-        // Scale down frame for performance
-        const scale = 320 / video.videoWidth;
-        canvas.width = 320;
-        canvas.height = video.videoHeight * scale;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const trySendFrame = () => {
+      // Backpressure: don't send if still waiting for previous response
+      if (awaitingResponseRef.current) return;
+      if (!video.videoWidth || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              const reader = new FileReader();
-              reader.onload = () => {
-                const base64 = (reader.result as string).split(",")[1];
-                wsRef.current?.send(base64);
-              };
-              reader.readAsDataURL(blob);
-            }
-          },
-          "image/jpeg",
-          0.5
-        );
-        lastSendTime = timestamp;
+      // Resize canvas if video dimensions changed
+      const newScale = sendWidth / video.videoWidth;
+      const newH = Math.round(video.videoHeight * newScale);
+      if (canvas.width !== sendWidth || canvas.height !== newH) {
+        canvas.width = sendWidth;
+        canvas.height = newH;
       }
-      animationId = requestAnimationFrame(sendFrame);
+
+      // Draw & encode
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = (reader.result as string).split(",")[1];
+            awaitingResponseRef.current = true;
+            sendTimestampRef.current = Date.now();
+            wsRef.current?.send(base64);
+          };
+          reader.readAsDataURL(blob);
+        },
+        "image/jpeg",
+        sendQuality
+      );
     };
 
-    animationId = requestAnimationFrame(sendFrame);
-    return () => cancelAnimationFrame(animationId);
-  }, [isStreaming, isConnected]);
+    // Use setInterval with adaptive rate instead of rAF
+    // (rAF fires at 60fps but we only need 5-12fps)
+    const tick = () => {
+      trySendFrame();
+    };
+
+    // Start with a fixed interval, then adapt
+    intervalRef.current = setInterval(tick, 100); // Check every 100ms
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isStreaming, isConnected, sendWidth, sendQuality]);
 
   // Auto-start
   useEffect(() => {
@@ -171,11 +250,16 @@ export function CameraStream({
     <div className={`relative overflow-hidden rounded-xl bg-slate-900 ${className}`}>
       {/* Hidden video element */}
       <video ref={videoRef} className="hidden" playsInline muted />
+      {/* Reusable hidden canvas for frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Display processed frame or placeholder */}
       {processedFrame ? (
-        <img src={processedFrame} alt="Processed camera feed" className="h-full w-full object-cover" />
+        <img
+          src={processedFrame}
+          alt="Processed camera feed"
+          className="h-full w-full object-cover"
+        />
       ) : (
         <div className="flex h-full min-h-[200px] items-center justify-center text-slate-500">
           <Camera className="h-12 w-12" />
@@ -212,12 +296,17 @@ export function CameraStream({
       </div>
 
       {/* Status indicator */}
-      <div className="absolute left-2 top-2">
+      <div className="absolute left-2 top-2 flex items-center gap-2">
         <div
           className={`h-3 w-3 rounded-full ${
             isConnected ? "animate-pulse bg-green-500" : "bg-gray-500"
           }`}
         />
+        {isStreaming && (
+          <span className="text-[10px] text-white/50 font-mono">
+            {fps} fps · {lastRTTRef.current}ms
+          </span>
+        )}
       </div>
     </div>
   );

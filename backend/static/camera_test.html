@@ -797,8 +797,10 @@
         stopBtn.addEventListener('click', () => {
             stopNavigation();
             stopAllAudio();
+            stopSendLoop();
             if (guidanceInterval) { clearInterval(guidanceInterval); guidanceInterval = null; }
             isProcessing = false;
+            awaitingResponse = false;
             if (ws) { ws.close(); ws = null; }
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             statusEl.textContent = 'Stopped';
@@ -808,54 +810,110 @@
             mapContainer.classList.remove('visible');
         });
 
-        // ─── WEBSOCKET ─────────────────────────────────────────────────
+        // ─── WEBSOCKET (optimized: backpressure + adaptive rate) ───────
+        let awaitingResponse = false;  // Backpressure flag
+        let sendTimestamp = 0;         // For RTT measurement
+        let adaptiveInterval = 150;    // ms, adapts based on server speed
+        let sendIntervalId = null;     // setInterval handle
+        let fpsCount = 0;
+        let fpsTimer = Date.now();
+        let currentFps = 0;
+        let currentRtt = 0;
+
+        // Reusable canvas for frame capture (avoid GC churn)
+        const sendCanvas = document.createElement('canvas');
+        const sendCtx = sendCanvas.getContext('2d');
+        const SEND_WIDTH = 240;  // Downscale to this width for speed
+
         function connectWebSocket() {
             const wsUrl = serverUrl.replace('http', 'ws') + '/ws/video';
             ws = new WebSocket(wsUrl);
-            ws.onopen = () => { isProcessing = true; sendFrame(); };
+            ws.onopen = () => {
+                isProcessing = true;
+                awaitingResponse = false;
+                startSendLoop();
+            };
             ws.onmessage = (ev) => {
                 try {
                     const data = JSON.parse(ev.data);
-                    if (data.error) return;
-                    
+                    if (data.error) { awaitingResponse = false; return; }
+
+                    // ── Measure RTT & adapt send rate ──
+                    const rtt = Date.now() - sendTimestamp;
+                    currentRtt = rtt;
+                    // Target ~60% utilization: if server takes 50ms → send every ~80ms
+                    adaptiveInterval = Math.max(80, Math.min(800, Math.round(rtt * 1.6)));
+
+                    // ── FPS counter ──
+                    fpsCount++;
+                    const now = Date.now();
+                    if (now - fpsTimer >= 1000) {
+                        currentFps = fpsCount;
+                        fpsCount = 0;
+                        fpsTimer = now;
+                    }
+
+                    // Only update image when server sends an annotated frame
+                    // (server skips annotation on some frames for speed)
                     if (data.frame_base64) {
                         processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
                         videoContainer.classList.remove('show-video');
                     }
                     if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
                     if (data.instruction) lastSpokenAnnouncement = data.instruction;
-                    
-                    isProcessingWsFrame = false;
-                    if (isProcessing) setTimeout(sendFrame, 150);
+
+                    // Release backpressure
+                    awaitingResponse = false;
                 } catch (e) {
                     console.error("WS parse error", e);
-                    isProcessingWsFrame = false;
+                    awaitingResponse = false;
                 }
             };
-            ws.onerror = () => { statusEl.textContent = 'WebSocket error'; statusEl.style.color = '#e74c3c'; isProcessingWsFrame = false; };
-            ws.onclose = () => { if (isProcessing) setTimeout(connectWebSocket, 2000); };
+            ws.onerror = () => {
+                statusEl.textContent = 'WebSocket error';
+                statusEl.style.color = '#e74c3c';
+                awaitingResponse = false;
+            };
+            ws.onclose = () => {
+                stopSendLoop();
+                if (isProcessing) setTimeout(connectWebSocket, 2000);
+            };
         }
-        
-        function sendFrame() {
-            if (isProcessingWsFrame || !videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
-            
-            isProcessingWsFrame = true;
-            const canvas = document.createElement('canvas');
-            const scale = 240 / videoEl.videoWidth;
-            canvas.width = 240;
-            canvas.height = videoEl.videoHeight * scale;
-            
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob(blob => {
-                if (!blob) { isProcessingWsFrame = false; return; }
+
+        function startSendLoop() {
+            if (sendIntervalId) return;
+            // Poll at a fixed fast rate; backpressure prevents over-sending
+            sendIntervalId = setInterval(trySendFrame, 80);
+        }
+
+        function stopSendLoop() {
+            if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
+        }
+
+        function trySendFrame() {
+            // Backpressure: skip if still waiting for previous response
+            if (awaitingResponse) return;
+            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            // Resize reusable canvas if needed
+            const scale = SEND_WIDTH / videoEl.videoWidth;
+            const h = Math.round(videoEl.videoHeight * scale);
+            if (sendCanvas.width !== SEND_WIDTH || sendCanvas.height !== h) {
+                sendCanvas.width = SEND_WIDTH;
+                sendCanvas.height = h;
+            }
+
+            sendCtx.drawImage(videoEl, 0, 0, sendCanvas.width, sendCanvas.height);
+            sendCanvas.toBlob(blob => {
+                if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
                 const reader = new FileReader();
                 reader.onload = () => {
-                    if (ws.readyState === WebSocket.OPEN) ws.send(reader.result.split(',')[1]);
-                    else isProcessingWsFrame = false;
+                    awaitingResponse = true;
+                    sendTimestamp = Date.now();
+                    ws.send(reader.result.split(',')[1]);
                 };
                 reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.4);
+            }, 'image/jpeg', 0.35);  // Lower quality = smaller payload = faster
         }
 
         // ─── ANNOUNCE (What's Ahead) ───────────────────────────────────
