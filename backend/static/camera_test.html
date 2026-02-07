@@ -438,13 +438,17 @@
             statusEl.textContent = '🧠 Analyzing scene...';
             
             try {
-                // 1. Capture current frame as Blob
+                // 1. Capture current frame as Blob (Optimized for Speed)
                 const canvas = document.createElement('canvas');
-                canvas.width = videoEl.videoWidth;
-                canvas.height = videoEl.videoHeight;
-                canvas.getContext('2d').drawImage(videoEl, 0, 0);
+                // Scale down to max 640 width for faster upload/processing
+                const scale = Math.min(1, 640 / videoEl.videoWidth);
+                canvas.width = videoEl.videoWidth * scale;
+                canvas.height = videoEl.videoHeight * scale;
                 
-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+                canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                
+                // Lower quality to 0.6 for smaller payload
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.6));
                 
                 // 2. Send to server for Deep Reasoning
                 const formData = new FormData();
