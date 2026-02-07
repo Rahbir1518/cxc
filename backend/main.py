@@ -334,8 +334,15 @@ async def websocket_video(websocket: WebSocket):
     
     Client sends: base64-encoded JPEG frames
     Server sends: JSON with detections + annotated frame base64
+    
+    Performance: Depth estimation runs every Nth frame to reduce latency.
     """
     await manager.connect(websocket)
+    
+    # Frame skipping for performance
+    frame_count = 0
+    depth_skip_frames = 5  # Run depth estimation every 5th frame
+    cached_depth_map = None
     
     try:
         while True:
@@ -355,14 +362,21 @@ async def websocket_video(websocket: WebSocket):
                 await websocket.send_json({"error": "Could not decode frame"})
                 continue
             
-            # Detect objects
+            frame_count += 1
+            
+            # Detect objects (fast with YOLOv8n)
             detections = detector.detect(frame) if detector else []
             
-            # Estimate distances
+            # Estimate distances - ONLY every Nth frame for performance
             if depth_estimator is not None and detections:
-                depth_map, _ = depth_estimator.estimate(frame)
-                for det in detections:
-                    det.distance = depth_estimator.get_distance_for_bbox(depth_map, det.bbox)
+                if frame_count % depth_skip_frames == 0 or cached_depth_map is None:
+                    # Recalculate depth map
+                    cached_depth_map, _ = depth_estimator.estimate(frame)
+                
+                # Use cached or fresh depth map
+                if cached_depth_map is not None:
+                    for det in detections:
+                        det.distance = depth_estimator.get_distance_for_bbox(cached_depth_map, det.bbox)
             
             # Draw annotations
             if detections:

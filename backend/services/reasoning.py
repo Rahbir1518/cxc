@@ -207,7 +207,7 @@ class ObstacleClassifier:
             import json
             return json.loads(text)
         except Exception as e:
-            print(f"⚠️ Intent parsing failed: {e}")
+            print(f"⚠️ Intent parsing failed (Rate Limit or Network): {e}")
             # Final fallback: if Gemini fails, try any digit sequence in text
             any_digits = re.search(r'(\d+)', user_text)
             if any_digits:
@@ -219,6 +219,7 @@ class ObstacleClassifier:
         Use Gemini's MULTIMODAL capabilities (Vision + Text).
         Sends the actual image to the model for "human-like" scene understanding.
         """
+        # Always fallback to rule-based if client is not enabled or if previous calls failed freqently
         if not self.client:
             return self.generate_navigation_instruction(detections)
             
@@ -270,7 +271,9 @@ RULES:
                 )
                 return response.text.strip()
             except Exception as e:
-                print(f"⚠️ Gemini Visual reasoning failed: {e}")
+                print(f"⚠️ Gemini Visual reasoning failed (Rate Limit?): {e}")
+                # FALLBACK to rule-based logic immediately
+                return self.generate_navigation_instruction(detections)
         
         # Fallback: Text-only reasoning
         classified = self.classify_all(detections)

@@ -66,10 +66,19 @@
         
         #mapContainer.visible { display: block; }
         
-        #mapSvg {
+        #mapImg {
             width: 100%;
             height: 100%;
             object-fit: contain;
+        }
+        
+        #routeCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
         }
         
         .nav-overlay {
@@ -189,7 +198,8 @@
         
         <div id="mapContainer">
             <div class="nav-overlay" id="navInfo">Destination: —</div>
-            <object id="mapSvg" type="image/svg+xml"></object>
+            <img id="mapImg" alt="Floor Plan" />
+            <canvas id="routeCanvas"></canvas>
         </div>
         
         <p class="voice-prompt" style="margin-bottom:0;">Camera — you’ll hear what’s in the way when you tap Announce.</p>
@@ -230,7 +240,8 @@
         const stopBtn = document.getElementById('stopBtn');
         const voiceNavBtn = document.getElementById('voiceNavBtn');
         const mapContainer = document.getElementById('mapContainer');
-        const mapSvg = document.getElementById('mapSvg');
+        const mapImg = document.getElementById('mapImg');
+        const routeCanvas = document.getElementById('routeCanvas');
         const navInfo = document.getElementById('navInfo');
         const detectionList = document.getElementById('detectionList');
         const voicePrompt = document.getElementById('voicePrompt');
@@ -254,9 +265,13 @@
         let guidanceInterval = null;
         let recognition = null;
         
-        function setMapSvgSource() {
-            if (serverUrl && mapSvg) {
-                mapSvg.data = serverUrl + '/static/floor_plans/basement.svg';
+        function setMapSource() {
+            if (serverUrl && mapImg) {
+                // Use PNG for background, much more reliable than SVG object
+                mapImg.src = serverUrl + '/static/floor_plans/basement.png';
+                // Reset canvas when map changes
+                const ctx = routeCanvas.getContext('2d');
+                ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
             }
         }
         
@@ -273,7 +288,7 @@
                     statusEl.style.color = '#4ecca3';
                     startBtn.disabled = false;
                     voiceNavBtn.disabled = false;
-                    setMapSvgSource();
+                    setMapSource();
                 })
                 .catch(err => {
                     statusEl.textContent = `✗ ${err.message}`;
@@ -324,20 +339,26 @@
             ws = new WebSocket(wsUrl);
             ws.onopen = () => { isProcessing = true; sendFrame(); };
             ws.onmessage = (ev) => {
-                const data = JSON.parse(ev.data);
-                if (data.error) return;
-                if (data.frame_base64) {
-                    processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
-                    videoContainer.classList.remove('show-video');
+                try {
+                    const data = JSON.parse(ev.data);
+                    if (data.error) return;
+                    
+                    if (data.frame_base64) {
+                        processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
+                        videoContainer.classList.remove('show-video');
+                    }
+                    if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
+                    if (data.instruction) lastSpokenAnnouncement = data.instruction;
+                    
+                    // Ready for next frame
+                    isProcessingWsFrame = false;
+                    if (isProcessing) setTimeout(sendFrame, 150); // Control frame rate
+                } catch (e) {
+                    console.error("WS parse error", e);
+                    isProcessingWsFrame = false;
                 }
-                if (data.objects) { lastDetections = data.objects; updateDetectionsList(data.objects); }
-                if (data.instruction) lastSpokenAnnouncement = data.instruction;
-                
-                // Ready for next frame
-                isProcessingWsFrame = false;
-                if (isProcessing) setTimeout(sendFrame, 150); // Control frame rate
             };
-            ws.onerror = () => { statusEl.textContent = 'WebSocket error'; statusEl.style.color = '#e74c3c'; };
+            ws.onerror = () => { statusEl.textContent = 'WebSocket error'; statusEl.style.color = '#e74c3c'; isProcessingWsFrame = false; };
             ws.onclose = () => { if (isProcessing) setTimeout(connectWebSocket, 2000); };
         }
         
@@ -351,15 +372,17 @@
             canvas.width = 240;
             canvas.height = videoEl.videoHeight * scale;
             
-            canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
             canvas.toBlob(blob => {
+                if (!blob) { isProcessingWsFrame = false; return; }
                 const reader = new FileReader();
                 reader.onload = () => {
-                    ws.send(reader.result.split(',')[1]);
-                    // We'll reset this in onmessage when server replies
+                    if (ws.readyState === WebSocket.OPEN) ws.send(reader.result.split(',')[1]);
+                    else isProcessingWsFrame = false;
                 };
                 reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.4); // Even lower quality for speed
+            }, 'image/jpeg', 0.4); 
         }
         
         announceBtn.addEventListener('click', async () => {
@@ -376,10 +399,13 @@
                 const form = new FormData();
                 form.append('file', blob, 'scene.jpg');
                 if (isNavigating && navDestination) form.append('navigation_context', 'User is heading to room ' + navDestination + '. Give verbal directions: say how many steps left or right if something is in the way.');
+                
                 const res = await fetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
                 if (!res.ok) throw new Error('Server ' + res.status);
+                
                 const data = await res.json();
                 const announcement = (data.announcement || "I couldn't analyze the scene.").trim();
+                
                 if (data.frame_base64) {
                     processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
                     videoContainer.classList.remove('show-video');
@@ -388,8 +414,9 @@
                 await speakWithElevenLabs(announcement);
                 lastSpokenAnnouncement = announcement;
             } catch (err) {
+                console.error(err);
                 statusEl.textContent = 'Error: ' + err.message;
-                speak(lastSpokenAnnouncement || "Something went wrong. Check the server.");
+                speak(lastSpokenAnnouncement || "Something went wrong. Check the server connection.");
             }
             announceBtn.disabled = false;
             if (isProcessing) statusEl.textContent = 'Camera on — tap Announce again for directions';
@@ -493,12 +520,20 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text, start_room: START_ROOM })
                 });
+                
+                if (!res.ok) {
+                   const errText = await res.text();
+                   throw new Error(errText || 'Navigation failed');
+                }
+                
                 const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'No path');
+                if (data.error) throw new Error(data.error);
+                
                 startNavigation(data);
             } catch (err) {
-                statusEl.textContent = '❌ ' + err.message;
-                speak(err.message);
+                console.error(err);
+                statusEl.textContent = '❌ ' + (err.message || "Failed to find path");
+                speak("I couldn't find a path to that room.");
                 manualEntry.classList.add('visible');
             }
         }
@@ -509,20 +544,26 @@
             navDestination = data.destination || '?';
             
             navInfo.textContent = 'Destination: Room ' + navDestination;
-            if (serverUrl && !mapSvg.data) mapSvg.data = serverUrl + '/static/floor_plans/basement.svg';
+            if (serverUrl && !mapImg.src) mapImg.src = serverUrl + '/static/floor_plans/basement.png';
             mapContainer.classList.add('visible');
             voiceNavBtn.textContent = '🛑 Stop nav';
             voiceNavBtn.classList.add('active-nav');
             statusEl.textContent = '🧭 Navigating to room ' + navDestination;
             
             speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will tell you when to turn and when to watch for obstacles. Tap Announce to hear what is in front of you.`);
-            drawPathOnMap(navPath);
+            
+            // Draw route on canvas
+            setTimeout(() => drawPathOnMap(navPath), 500); // Wait for image load/layout
             
             startDynamicGuidance();
         }
         
         function stopNavigation() {
             isNavigating = false;
+            // Clear canvas
+            const ctx = routeCanvas.getContext('2d');
+            ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
+            
             if (guidanceInterval) { clearInterval(guidanceInterval); guidanceInterval = null; }
             mapContainer.classList.remove('visible');
             resetVoiceBtn();
@@ -533,48 +574,50 @@
         function drawPathOnMap(path) {
             if (!path?.length) return;
             
-            function draw() {
-                const doc = mapSvg.contentDocument;
-                if (!doc) {
-                    mapSvg.onload = () => { mapSvg.onload = null; draw(); };
-                    setTimeout(draw, 400);
-                    return;
-                }
-                const svg = doc.documentElement || doc.querySelector('svg');
-                if (!svg) return;
-                
-                const ns = 'http://www.w3.org/2000/svg';
-                const oldGroup = doc.getElementById('navRouteGroup');
-                if (oldGroup) oldGroup.remove();
-                
-                const g = doc.createElementNS(ns, 'g');
-                g.setAttribute('id', 'navRouteGroup');
-                
-                const poly = doc.createElementNS(ns, 'polyline');
-                poly.setAttribute('points', path.map(p => `${p.x},${p.y}`).join(' '));
-                poly.setAttribute('stroke', '#007bff');
-                poly.setAttribute('stroke-width', '12');
-                poly.setAttribute('fill', 'none');
-                poly.setAttribute('stroke-linecap', 'round');
-                poly.setAttribute('stroke-linejoin', 'round');
-                poly.setAttribute('opacity', '0.95');
-                g.appendChild(poly);
-                
-                path.forEach((p, i) => {
-                    const circle = doc.createElementNS(ns, 'circle');
-                    circle.setAttribute('cx', p.x);
-                    circle.setAttribute('cy', p.y);
-                    circle.setAttribute('r', '14');
-                    circle.setAttribute('fill', '#007bff');
-                    circle.setAttribute('stroke', '#fff');
-                    circle.setAttribute('stroke-width', '4');
-                    circle.setAttribute('opacity', '0.95');
-                    g.appendChild(circle);
-                });
-                
-                svg.appendChild(g);
+            const ctx = routeCanvas.getContext('2d');
+            // Match canvas size to displayed image size
+            routeCanvas.width = mapImg.clientWidth;
+            routeCanvas.height = mapImg.clientHeight;
+            
+            if (routeCanvas.width === 0) {
+                // Image not loaded yet, retry
+                setTimeout(() => drawPathOnMap(path), 500);
+                return;
             }
-            draw();
+            
+            // Clear previous
+            ctx.clearRect(0, 0, routeCanvas.width, routeCanvas.height);
+            
+            // Assuming path coordinates match the intrinsic image size (1224x792)
+            // We need to scale them to the displayed size
+            const scaleX = routeCanvas.width / 1224;
+            const scaleY = routeCanvas.height / 792;
+            
+            // Draw Path
+            ctx.beginPath();
+            ctx.moveTo(path[0].x * scaleX, path[0].y * scaleY);
+            for (let i = 1; i < path.length; i++) {
+                ctx.lineTo(path[i].x * scaleX, path[i].y * scaleY);
+            }
+            ctx.strokeStyle = '#007bff';
+            ctx.lineWidth = 5;
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.stroke();
+            
+            // Draw Points
+            path.forEach((p, i) => {
+                const x = p.x * scaleX;
+                const y = p.y * scaleY;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, i === 0 || i === path.length - 1 ? 8 : 4, 0, Math.PI * 2);
+                ctx.fillStyle = i === 0 ? '#2ecc71' : (i === path.length - 1 ? '#e74c3c' : '#3498db');
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
         }
         
         function startDynamicGuidance() {
@@ -602,7 +645,7 @@
                         await speakWithElevenLabs(announcement);
                     }
                 } catch (e) { console.warn('Guidance:', e); }
-            }, 5000);
+            }, 8000); // Increased to 8s to avoid hitting rate limits
         }
         
         window.addEventListener('load', () => {
@@ -612,7 +655,7 @@
             else serverUrlInput.value = 'localhost:8000';
             if (port === '8000' || window.location.origin.includes('8000')) {
                 serverUrl = window.location.origin;
-                setMapSvgSource();
+                setMapSource();
             }
         });
     </script>
