@@ -1,0 +1,28 @@
+# Core dependencies
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.6
+pydantic>=2.5.0
+
+# Computer Vision
+opencv-python>=4.9.0
+numpy>=1.26.0
+Pillow>=10.2.0
+
+# ML Frameworks
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Detectron2 (install separately, requires specific build)
+# git+https://github.com/facebookresearch/detectron2.git
+
+# DPT (Dense Prediction Transformer)
+transformers>=4.36.0
+
+# Audio processing (optional, for local Whisper)
+# openai-whisper>=20231117
+# librosa>=0.10.1
+
+# Development
+python-dotenv>=1.0.0
