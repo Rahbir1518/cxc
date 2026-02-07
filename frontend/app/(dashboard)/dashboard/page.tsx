@@ -369,7 +369,7 @@ export default function DashboardPage() {
       {/* ── MAIN CONTENT ── */}
       <div className="flex-1 overflow-y-auto p-4" style={{ display: "flex", flexDirection: "column", gap: "var(--space-lg)" }}>
         {/* Camera + Map row */}
-        <div style={{ display: "grid", gridTemplateColumns: isNavigating ? "1fr 400px" : "1fr", gap: "var(--space-lg)", height: "55vh", minHeight: 360 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isNavigating ? "1fr 400px" : "1fr", gap: "var(--space-lg)", height: "65vh", minHeight: 400 }}>
           {/* Camera View */}
           <div
             style={{
