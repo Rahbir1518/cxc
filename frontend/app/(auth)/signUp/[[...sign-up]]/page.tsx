@@ -1,15 +1,9 @@
-import React from 'react'
-import Link from "next/link"
-const SignUp = () => {
-  return (
-    <div>
-        <Link href="/dashboard">
-            <button style={{ padding: '10px 20px', cursor: 'pointer' }} className='bg-red-600'>
-            Dashboard from Sign Up
-            </button>
-        </Link>
-    </div>
-  )
-}
+import { SignUp } from "@clerk/nextjs";
 
-export default SignUp
+export default function SignUpPage() {
+  return (
+    <div className="flex min-h-screen items-center justify-center">
+      <SignUp />
+    </div>
+  );
+}
