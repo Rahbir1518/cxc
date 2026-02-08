@@ -778,12 +778,9 @@ async def websocket_glasses(websocket: WebSocket):
             classified = classifier.classify_all(detection_dicts)
             cached_classified = classified
 
-            # 6. Annotate + encode
-            annotated = (
-                detector.draw_detections(frame, detections) if detections else frame
-            )
+            # 6. Encode raw frame (no bounding boxes — reduces latency)
             _, buffer = cv2.imencode(
-                ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 50]
+                ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 50]
             )
             frame_b64 = base64.b64encode(buffer).decode("utf-8")
 

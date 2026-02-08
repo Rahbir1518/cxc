@@ -57,14 +57,9 @@ class ObstacleClassifier:
             if api_key and api_key != "your_gemini_api_key_here":
                 try:
                     self.client = genai.Client(api_key=api_key)
-                    # Test the model
-                    test_response = self.client.models.generate_content(
-                        model=self.model_name,
-                        contents="test"
-                    )
-                    print(f"✓ Gemini reasoning enabled ({self.model_name})")
+                    print(f"✓ Gemini client created ({self.model_name}) — ready for reasoning & text reading")
                 except Exception as e:
-                    print(f"⚠️ Gemini init failed: {e}")
+                    print(f"⚠️ Gemini client init failed: {e}")
                     self.client = None
             else:
                 print("⚠️ GOOGLE_GEMINI_API_KEY not configured — using rule-based reasoning")
