@@ -380,6 +380,12 @@ async def analyze_and_announce(
     # This adds zero extra latency — both calls execute concurrently.
     # return_exceptions=True ensures braille errors NEVER break the normal announcement.
     braille_reader = get_braille_reader()
+
+    # Pass navigation destination to braille reader for context-aware detection
+    if navigation_context:
+        import re
+        dest_match = re.search(r'room\s*(\w+)', navigation_context, re.IGNORECASE)
+        braille_reader.set_navigation_context(dest_match.group(1) if dest_match else None)
     
     announcement_task = classifier.reason_with_gemini(
         detection_dicts, 
