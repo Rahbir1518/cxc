@@ -11,7 +11,7 @@ export default function SignInPage() {
         {/* Logo */}
         <Link href="/" style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontWeight: 700, fontSize: "1.5rem" }}>
           <div className="logo-icon">
-            <i className="fas fa-eye" />
+            <img src="/logo.jpg" alt="DWS logo" />
           </div>
           <span className="logo-text">DWS</span>
         </Link>

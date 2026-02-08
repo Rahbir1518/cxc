@@ -197,17 +197,15 @@ img { max-width: 100%; height: auto; display: block; }
 .logo { display: flex; align-items: center; gap: var(--space-sm); font-weight: 700; font-size: 1.5rem; letter-spacing: -0.02em; }
 .logo-icon {
   width: 40px; height: 40px;
-  background: var(--gradient-smoke);
   border-radius: var(--radius-md);
-  display: flex; align-items: center; justify-content: center;
-  position: relative; overflow: hidden;
+  overflow: hidden;
+  flex-shrink: 0;
 }
-.logo-icon::before {
-  content: ''; position: absolute; inset: 2px;
-  background: var(--color-bg-primary);
-  border-radius: calc(var(--radius-md) - 2px);
+.logo-icon img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
 }
-.logo-icon i { position: relative; z-index: 1; color: var(--color-primary-400); font-size: 1.1rem; }
 .logo-text {
   background: linear-gradient(135deg, #fff 0%, var(--color-primary-400) 100%);
   -webkit-background-clip: text;

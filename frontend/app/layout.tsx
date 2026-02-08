@@ -19,6 +19,13 @@ export const metadata: Metadata = {
   title: "DWS — Digital Walking Stick | AI-Powered Indoor Navigation",
   description:
     "Voice-first indoor navigation assistant for visually impaired users. Real-time computer vision, AI scene understanding, and intelligent pathfinding.",
+  icons: {
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
+  openGraph: {
+    images: ["/logo.jpg"],
+  },
 };
 
 export default function RootLayout({

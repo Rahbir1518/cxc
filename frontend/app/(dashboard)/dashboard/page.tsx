@@ -329,7 +329,7 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2">
             <div className="logo-icon" style={{ width: 32, height: 32 }}>
-              <i className="fas fa-eye" style={{ fontSize: "0.8rem" }} />
+              <img src="/logo.jpg" alt="DWS logo" />
             </div>
             <span className="logo-text" style={{ fontSize: "1.1rem" }}>DWS</span>
           </Link>
