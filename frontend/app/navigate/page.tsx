@@ -81,6 +81,9 @@ export default function NavigatePage() {
   const [manualTo, setManualTo] = useState("");
   const [showManual, setShowManual] = useState(false);
 
+  // ── Braille state ──
+  const [brailleText, setBrailleText] = useState<string | null>(null);
+
   // ── Status ──
   const [status, setStatus] = useState("Tap Connect to start");
 
@@ -281,6 +284,13 @@ export default function NavigatePage() {
         data.announcement || "I couldn't analyze the scene."
       ).trim();
 
+      // Update braille text if detected
+      if (data.braille_text) {
+        setBrailleText(data.braille_text);
+      } else {
+        setBrailleText(null);
+      }
+
       setStatus("🗣️ Speaking...");
       await speak(announcement);
       setStatus(
@@ -376,6 +386,18 @@ export default function NavigatePage() {
         {instruction && (
           <div className="bg-slate-800/60 rounded-lg px-4 py-2 text-sm text-slate-300">
             {instruction}
+          </div>
+        )}
+
+        {/* Braille detection indicator */}
+        {brailleText && (
+          <div className="bg-purple-900/40 border border-purple-500/30 rounded-lg px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-purple-400 font-semibold text-xs uppercase tracking-wider">
+                ⠿ Braille Detected
+              </span>
+            </div>
+            <p className="text-purple-100 font-medium">{brailleText}</p>
           </div>
         )}
 

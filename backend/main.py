@@ -32,6 +32,7 @@ from services.tts import generate_voice_and_track_cost
 from services.reasoning import ObstacleClassifier, get_classifier
 from services.pathfinding import get_pathfinder
 from services.map_analyzer import get_map_analyzer
+from services.braille import get_braille_reader
 
 load_dotenv()
 
@@ -104,6 +105,9 @@ async def lifespan(app: FastAPI):
             print("   Navigation will be limited.")
     else:
         print(f"⚠️  Floor plan not found at {svg_path}")
+    
+    print("\n📦 Loading braille detection service...")
+    braille_reader = get_braille_reader()
     
     print("\n✅ Server ready!")
     print("="*50)
@@ -372,11 +376,28 @@ async def analyze_and_announce(
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_frame)
     
-    announcement = await classifier.reason_with_gemini(
+    # ── Run scene reasoning AND braille detection IN PARALLEL ──
+    # This adds zero extra latency — both calls execute concurrently.
+    braille_reader = get_braille_reader()
+    
+    announcement_task = classifier.reason_with_gemini(
         detection_dicts, 
         image_data=pil_image,
         navigation_context=navigation_context
     )
+    braille_task = braille_reader.detect_and_read(pil_image)
+    
+    announcement, braille_text = await asyncio.gather(
+        announcement_task, braille_task
+    )
+    
+    # ── If braille was found, append the reading to the announcement ──
+    if braille_text:
+        announcement = (
+            f"{announcement} "
+            f"I also detected braille text that reads: {braille_text}."
+        )
+        print(f"⠿ Braille detected: {braille_text}")
     
     # Draw boxes
     annotated = detector.draw_detections(frame, detections)
@@ -391,6 +412,7 @@ async def analyze_and_announce(
         "objects": objects_serializable,
         "frame_base64": frame_base64,
         "announcement": announcement,
+        "braille_text": braille_text,  # Separate field for UI display
     })
 
 

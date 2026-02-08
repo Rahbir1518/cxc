@@ -457,6 +457,11 @@
             <button id="goBtn" style="padding: 0.6rem 1rem; background: var(--gradient-smoke); color: var(--color-bg-primary); border-radius: var(--radius-md);">Go</button>
         </div>
 
+        <div class="info-panel" id="braillePanel" style="display:none; border-color: rgba(139,92,246,0.3);">
+            <h2 style="color:#a78bfa;">⠿ Braille Detected</h2>
+            <div id="brailleText" style="font-size:1rem; color:#e9d5ff; font-weight:500;"></div>
+        </div>
+
         <div class="info-panel">
             <h2>Detected objects</h2>
             <div id="detectionList">Start camera to see detections.</div>
@@ -482,6 +487,8 @@
         const manualEntry = document.getElementById('manualEntry');
         const videoContainer = document.getElementById('videoContainer');
         const announceBtn = document.getElementById('announceBtn');
+        const braillePanel = document.getElementById('braillePanel');
+        const brailleTextEl = document.getElementById('brailleText');
         const mapLegend = document.getElementById('mapLegend');
         const navProgress = document.getElementById('navProgress');
         const progressFill = document.getElementById('progressFill');
@@ -1050,6 +1057,15 @@
                 const data = await res.json();
                 const announcement = (data.announcement || "I couldn't analyze the scene.").trim();
 
+                // Show braille text if detected
+                if (data.braille_text) {
+                    braillePanel.style.display = 'block';
+                    brailleTextEl.textContent = data.braille_text;
+                } else {
+                    braillePanel.style.display = 'none';
+                    brailleTextEl.textContent = '';
+                }
+
                 if (data.frame_base64) {
                     processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
                     videoContainer.classList.remove('show-video');
@@ -1217,6 +1233,13 @@
                     const res = await fetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
                     const data = await res.json();
                     const announcement = data.announcement;
+
+                    // Update braille indicator during navigation too
+                    if (data.braille_text) {
+                        braillePanel.style.display = 'block';
+                        brailleTextEl.textContent = data.braille_text;
+                    }
+
                     if (announcement && !isSpeakingEL) {
                         statusEl.textContent = '🗣️ ' + announcement.slice(0, 50) + '…';
                         await speakWithElevenLabs(announcement);
