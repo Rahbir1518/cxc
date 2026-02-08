@@ -21,6 +21,8 @@ import {
   Crosshair,
   Wifi,
   WifiOff,
+  Glasses,
+  BookOpen,
 } from "lucide-react";
 import { useSpeaker } from "@/components/navigation/VoiceSpeaker";
 
@@ -55,6 +57,18 @@ const CameraViewer = dynamic(
     loading: () => (
       <div className="flex items-center justify-center h-full bg-(--color-bg-card) rounded-xl" style={{ animation: "pulse-soft 2s infinite" }}>
         <Video className="h-12 w-12" style={{ color: "var(--color-text-muted)" }} />
+      </div>
+    ),
+  }
+);
+
+const GlassesViewer = dynamic(
+  () => import("@/components/navigation/GlassesViewer").then((m) => m.GlassesViewer),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full bg-(--color-bg-card) rounded-xl" style={{ animation: "pulse-soft 2s infinite" }}>
+        <Glasses className="h-12 w-12" style={{ color: "var(--color-text-muted)" }} />
       </div>
     ),
   }
@@ -95,7 +109,8 @@ export default function DashboardPage() {
 
   // Camera
   const [cameraActive, setCameraActive] = useState(false);
-  const [viewerMode, setViewerMode] = useState(true); // true = viewer (phone feed), false = local webcam
+  // "phone" = phone feed viewer, "webcam" = local webcam, "glasses" = meta glasses
+  const [viewerMode, setViewerMode] = useState<"phone" | "webcam" | "glasses">("phone");
 
   // Navigation
   const [navPath, setNavPath] = useState<PathNode[]>([]);
@@ -120,6 +135,9 @@ export default function DashboardPage() {
 
   // Live detections
   const [detections, setDetections] = useState<DetectedObject[]>([]);
+
+  // Glasses text reading
+  const [glassesText, setGlassesText] = useState("");
 
   // Analytics / session stats
   const [stats, setStats] = useState<SessionStats>({
@@ -211,6 +229,21 @@ export default function DashboardPage() {
   const handleInstruction = useCallback((instr: string) => {
     if (instr) setInstruction(instr);
   }, []);
+
+  // Handle text found from glasses (auto-speak for visually impaired)
+  const handleTextFound = useCallback((text: string) => {
+    if (text && !text.includes("No text visible") && !text.includes("don't see")) {
+      setGlassesText(text);
+    }
+  }, []);
+
+  // Read text aloud (glasses accessibility feature)
+  const readTextAloud = useCallback(async () => {
+    if (!glassesText) return;
+    setStatus("📖 Reading text aloud...");
+    await speak(glassesText);
+    setStatus(cameraActive ? "Glasses feed active" : "Ready");
+  }, [glassesText, speak, cameraActive]);
 
   // Voice navigation
   const startListening = useCallback(() => {
@@ -393,28 +426,38 @@ export default function DashboardPage() {
               }}
             >
               <button
-                onClick={() => { setViewerMode(true); setCameraActive(true); }}
+                onClick={() => { setViewerMode("phone"); setCameraActive(true); }}
                 className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
                 style={{
-                  background: viewerMode ? "rgba(191,200,195,0.15)" : "transparent",
-                  color: viewerMode ? "var(--color-primary-400)" : "var(--color-text-muted)",
+                  background: viewerMode === "phone" ? "rgba(191,200,195,0.15)" : "transparent",
+                  color: viewerMode === "phone" ? "var(--color-primary-400)" : "var(--color-text-muted)",
                 }}
               >
                 📱 Phone Feed
               </button>
               <button
-                onClick={() => { setViewerMode(false); setCameraActive(true); }}
+                onClick={() => { setViewerMode("glasses"); setCameraActive(true); }}
                 className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
                 style={{
-                  background: !viewerMode ? "rgba(191,200,195,0.15)" : "transparent",
-                  color: !viewerMode ? "var(--color-primary-400)" : "var(--color-text-muted)",
+                  background: viewerMode === "glasses" ? "rgba(147,197,253,0.2)" : "transparent",
+                  color: viewerMode === "glasses" ? "#93c5fd" : "var(--color-text-muted)",
+                }}
+              >
+                🕶️ Meta Glasses
+              </button>
+              <button
+                onClick={() => { setViewerMode("webcam"); setCameraActive(true); }}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold transition-all"
+                style={{
+                  background: viewerMode === "webcam" ? "rgba(191,200,195,0.15)" : "transparent",
+                  color: viewerMode === "webcam" ? "var(--color-primary-400)" : "var(--color-text-muted)",
                 }}
               >
                 🖥️ Local Webcam
               </button>
             </div>
 
-            {cameraActive && viewerMode ? (
+            {cameraActive && viewerMode === "phone" ? (
               <CameraViewer
                 serverUrl={BACKEND_URL}
                 autoConnect={true}
@@ -422,7 +465,16 @@ export default function DashboardPage() {
                 onDetections={handleDetections}
                 onInstruction={handleInstruction}
               />
-            ) : cameraActive && !viewerMode ? (
+            ) : cameraActive && viewerMode === "glasses" ? (
+              <GlassesViewer
+                serverUrl={BACKEND_URL}
+                autoConnect={true}
+                className="h-full w-full"
+                onDetections={handleDetections}
+                onInstruction={handleInstruction}
+                onTextFound={handleTextFound}
+              />
+            ) : cameraActive && viewerMode === "webcam" ? (
               <CameraStream
                 serverUrl={BACKEND_URL}
                 autoStart={true}
@@ -434,13 +486,14 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center justify-center h-full gap-4" style={{ color: "var(--color-text-muted)" }}>
                 <Video className="h-16 w-16" style={{ opacity: 0.3 }} />
                 <p style={{ fontSize: "0.9375rem" }}>Camera feed will appear here</p>
-                <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)", maxWidth: 320, textAlign: "center" }}>
-                  Open <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-primary-400)" }}>/static/camera_test.html</span> on your phone to stream, or use the local webcam
+                <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)", maxWidth: 360, textAlign: "center" }}>
+                  Open <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-primary-400)" }}>/static/camera_test.html</span> on your phone,{" "}
+                  <span style={{ fontFamily: "var(--font-mono)", color: "#93c5fd" }}>/static/glasses_feed.html</span> for Meta Glasses, or use the local webcam
                 </p>
                 {isConnected && (
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 flex-wrap justify-center">
                     <button
-                      onClick={() => { setViewerMode(true); setCameraActive(true); }}
+                      onClick={() => { setViewerMode("phone"); setCameraActive(true); }}
                       className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold"
                       style={{
                         background: "var(--gradient-smoke)",
@@ -452,7 +505,20 @@ export default function DashboardPage() {
                       <Video className="h-4 w-4" /> Phone Feed
                     </button>
                     <button
-                      onClick={() => { setViewerMode(false); setCameraActive(true); }}
+                      onClick={() => { setViewerMode("glasses"); setCameraActive(true); }}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold"
+                      style={{
+                        background: "rgba(147,197,253,0.15)",
+                        color: "#93c5fd",
+                        border: "1px solid rgba(147,197,253,0.2)",
+                        fontSize: "0.875rem",
+                        transition: "all var(--transition-fast)",
+                      }}
+                    >
+                      <Glasses className="h-4 w-4" /> Meta Glasses
+                    </button>
+                    <button
+                      onClick={() => { setViewerMode("webcam"); setCameraActive(true); }}
                       className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold"
                       style={{
                         background: "rgba(191,200,195,0.1)",
@@ -470,7 +536,7 @@ export default function DashboardPage() {
             )}
 
             {/* Overlay controls */}
-            {cameraActive && !viewerMode && (
+            {cameraActive && viewerMode === "webcam" && (
               <div className="absolute top-3 right-3 flex gap-2" style={{ zIndex: 20 }}>
                 <button
                   onClick={announceScene}
@@ -479,6 +545,31 @@ export default function DashboardPage() {
                 >
                   <Eye className="h-3.5 w-3.5" /> What&apos;s Ahead
                 </button>
+              </div>
+            )}
+
+            {/* Glasses text reading overlay */}
+            {cameraActive && viewerMode === "glasses" && glassesText && !glassesText.includes("No text visible") && (
+              <div
+                className="absolute bottom-16 left-3 right-3 flex items-start gap-2 rounded-lg px-3 py-2"
+                style={{
+                  background: "rgba(10,14,12,0.9)",
+                  backdropFilter: "blur(10px)",
+                  border: "1px solid rgba(147,197,253,0.2)",
+                  fontSize: "0.75rem",
+                  color: "#93c5fd",
+                  zIndex: 20,
+                  maxHeight: 80,
+                  overflow: "hidden",
+                  cursor: "pointer",
+                }}
+                onClick={readTextAloud}
+                title="Click to read aloud"
+              >
+                <BookOpen className="h-3.5 w-3.5 shrink-0" style={{ marginTop: 1 }} />
+                <span style={{ fontStyle: "italic" }}>
+                  {glassesText.length > 200 ? glassesText.slice(0, 200) + "..." : glassesText}
+                </span>
               </div>
             )}
 
@@ -570,7 +661,7 @@ export default function DashboardPage() {
               <>
                 {cameraActive ? (
                   <button
-                    onClick={() => { setCameraActive(false); stopNavigation(); }}
+                    onClick={() => { setCameraActive(false); stopNavigation(); setGlassesText(""); }}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
                     style={{ background: "rgba(252,165,165,0.15)", color: "#fca5a5", border: "1px solid rgba(252,165,165,0.2)" }}
                   >
@@ -578,11 +669,26 @@ export default function DashboardPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => { setViewerMode(true); setCameraActive(true); }}
+                    onClick={() => { setViewerMode("phone"); setCameraActive(true); }}
                     className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
                     style={{ background: "var(--gradient-smoke)", color: "var(--color-bg-primary)" }}
                   >
                     <Video className="h-4 w-4" /> Start Feed
+                  </button>
+                )}
+
+                {/* Read Text Aloud button (shown when glasses mode is active and text is found) */}
+                {cameraActive && viewerMode === "glasses" && glassesText && (
+                  <button
+                    onClick={readTextAloud}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm"
+                    style={{
+                      background: "rgba(147,197,253,0.15)",
+                      color: "#93c5fd",
+                      border: "1px solid rgba(147,197,253,0.2)",
+                    }}
+                  >
+                    <BookOpen className="h-4 w-4" /> Read Text Aloud
                   </button>
                 )}
 

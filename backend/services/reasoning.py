@@ -257,6 +257,58 @@ class ObstacleClassifier:
             f"Move to your {clear_side or 'right'}."
         )
 
+    async def read_text_in_image(self, image_data: Any) -> str:
+        """
+        Use Gemini Vision to perform OCR — read all visible text in the image.
+        Designed for visually impaired users wearing Meta Glasses who need
+        text read aloud (signs, labels, documents, screens, menus, etc.).
+        """
+        if not self.client:
+            return "Text reading requires Gemini AI, which is not configured."
+
+        prompt = (
+            "You are helping a visually impaired person read text through their smart glasses. "
+            "Carefully examine this image and read ALL visible text — signs, labels, documents, "
+            "screens, books, menus, nameplates, room numbers, posters, whiteboards, etc.\n\n"
+            "FORMAT YOUR RESPONSE AS SPOKEN WORDS (this will be read aloud via TTS):\n"
+            "1. Start with what type of text it is (e.g. 'There is a sign that reads...')\n"
+            "2. Read the text exactly as written\n"
+            "3. Briefly describe where each piece of text is located\n"
+            "4. If there are multiple pieces of text, read them in order from most prominent to least\n"
+            "5. If NO text is visible, say: 'I don't see any readable text right now.'\n\n"
+            "Keep it concise but complete. Maximum 3-4 sentences."
+        )
+
+        try:
+            img_buffer = io.BytesIO()
+            image_data.save(img_buffer, format="JPEG")
+            img_bytes = img_buffer.getvalue()
+
+            image_part = types.Part.from_bytes(
+                data=img_bytes,
+                mime_type="image/jpeg",
+            )
+
+            last_err = None
+            for attempt in range(GEMINI_MAX_RETRIES + 1):
+                try:
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.client.models.generate_content,
+                            model=self.model_name,
+                            contents=[prompt, image_part],
+                        ),
+                        timeout=GEMINI_TIMEOUT_S,
+                    )
+                    return response.text.strip()
+                except (asyncio.TimeoutError, Exception) as retry_err:
+                    last_err = retry_err
+                    if attempt < GEMINI_MAX_RETRIES:
+                        await asyncio.sleep(0.5 * (2 ** attempt))
+            return f"Could not read text: {last_err}"
+        except Exception as e:
+            return f"Text reading failed: {e}"
+
     async def get_navigation_intent(self, user_text: str) -> Dict[str, Any]:
         """
         Parse user navigation intent to extract start_room AND destination.
