@@ -43,31 +43,16 @@ BRAILLE_MAX_RETRIES = 1
 ROBOFLOW_CONFIDENCE = 30  # Minimum confidence for braille character detection
 
 # ── Gemini prompt for braille reading ──
-BRAILLE_READING_PROMPT = """Examine this image carefully for any braille text.
+BRAILLE_READING_PROMPT = """This image may contain braille text (patterns of raised dots).
 
-Braille is a tactile writing system using patterns of raised dots arranged in cells.
-Each cell has up to 6 dots in a 3-row × 2-column grid. Braille appears on:
-- Signs (room numbers, bathroom signs, elevator panels)
-- Door plates and nameplates
-- Books and documents
-- Packaging and labels
-- ATMs, vending machines, railings
+If you can see braille dots in this image, read them and tell me what they say in English.
 
-TASK:
-1. Determine if there is ANY braille visible in this image.
-2. If braille IS present, read it and translate to English.
+Rules:
+1. Only respond with the English translation of the braille
+2. If no braille is visible, respond with just: NONE
+3. Do not include explanations, just the text
 
-RESPONSE FORMAT:
-- If braille is found, respond with ONLY the English translation. No explanations.
-- If NO braille is visible, respond with exactly: NONE
-
-Examples of valid responses:
-  "Room 204"
-  "Exit"
-  "Push to open"
-  "Floor 3"
-  "NONE"
-"""
+What does the braille say?"""
 
 
 class BrailleReader:
@@ -123,23 +108,20 @@ class BrailleReader:
         Returns:
             The English text the braille says, or None if no braille found.
         """
-        # Strategy 1: If Roboflow available, use it for fast pre-filter
+        # Primary strategy: Use Gemini for braille reading (best accuracy)
+        # Gemini handles full sentences natively and is more reliable than
+        # character-by-character detection.
+        if self.gemini_client:
+            gemini_text = await self._read_with_gemini(image_data)
+            if gemini_text:
+                return gemini_text
+        
+        # Fallback: If Gemini fails or is unavailable, try Roboflow character detection
         if self.roboflow_model:
             roboflow_text = await self._detect_with_roboflow(image_data)
             if roboflow_text:
-                # Roboflow found braille characters — enhance with Gemini if available
-                if self.gemini_client:
-                    gemini_text = await self._read_with_gemini(image_data)
-                    if gemini_text:
-                        return gemini_text
                 return roboflow_text
-            # Roboflow found nothing — skip Gemini call (save API usage)
-            return None
-
-        # Strategy 2: Gemini-only (default, no extra API key needed)
-        if self.gemini_client:
-            return await self._read_with_gemini(image_data)
-
+        
         return None
 
     # ─────────────────────────────────────────────────────────────
@@ -301,20 +283,31 @@ class BrailleReader:
                         timeout=BRAILLE_TIMEOUT_S,
                     )
                     result = response.text.strip()
+                    print(f"🔍 Braille Gemini raw response: '{result}'")
 
                     # Check if braille was found
                     if result.upper() == "NONE" or not result:
+                        print("   → No braille detected (NONE response)")
                         return None
 
-                    # Filter out explanatory text if model got chatty
-                    # (should be just the translated text per our prompt)
-                    if "no braille" in result.lower():
-                        return None
-                    if "i don't see" in result.lower():
-                        return None
-                    if "there is no" in result.lower():
+                    # Filter out obvious negative responses (be careful not to filter valid text)
+                    result_lower = result.lower().strip()
+                    negative_phrases = [
+                        "no braille",
+                        "i don't see any braille",
+                        "cannot see any braille", 
+                        "there is no braille",
+                        "no dots visible",
+                        "image does not contain braille",
+                        "doesn't contain braille",
+                        "i cannot read",
+                        "unable to detect"
+                    ]
+                    if any(phrase in result_lower for phrase in negative_phrases):
+                        print(f"   → Filtered out negative response: '{result}'")
                         return None
 
+                    print(f"   ✓ Braille detected: '{result}'")
                     return result
 
                 except (asyncio.TimeoutError, Exception) as e:

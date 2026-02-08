@@ -236,6 +236,42 @@ async def announce_surroundings(request: AnnouncementRequest):
         raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
 
 
+@app.post("/read-braille")
+async def read_braille(file: UploadFile = File(...)):
+    """
+    Detect and read braille from an uploaded image.
+    This is a dedicated endpoint for braille-only detection (no scene reasoning).
+    
+    Returns:
+    - braille_text: The detected braille text, or null if none found
+    """
+    # Read image
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
+    # Convert to PIL Image for braille reader
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb_frame)
+    
+    # Read braille
+    braille_reader = get_braille_reader()
+    braille_text = await braille_reader.detect_and_read(pil_image)
+    
+    if braille_text:
+        print(f"⠿ Braille detected: {braille_text}")
+    else:
+        print("⠿ No braille detected in image")
+    
+    return JSONResponse({
+        "braille_text": braille_text,
+        "announcement": f"Braille text reads: {braille_text}" if braille_text else "No braille detected in this image."
+    })
+
+
 @app.post("/navigate")
 async def navigate(request: NavigateRequest):
     """

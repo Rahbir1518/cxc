@@ -449,6 +449,7 @@
             <button id="startBtn" disabled>📷 Start</button>
             <button id="stopBtn" disabled>⏹ Stop</button>
             <button id="announceBtn" disabled>🔊 What's Ahead</button>
+            <button id="brailleBtn" disabled style="background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);">⠿ Read Braille</button>
             <button id="voiceNavBtn" disabled>🎤 Navigate</button>
         </div>
 
@@ -487,6 +488,7 @@
         const manualEntry = document.getElementById('manualEntry');
         const videoContainer = document.getElementById('videoContainer');
         const announceBtn = document.getElementById('announceBtn');
+        const brailleBtn = document.getElementById('brailleBtn');
         const braillePanel = document.getElementById('braillePanel');
         const brailleTextEl = document.getElementById('brailleText');
         const mapLegend = document.getElementById('mapLegend');
@@ -907,6 +909,7 @@
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 announceBtn.disabled = false;
+                brailleBtn.disabled = false;
                 videoContainer.classList.add('show-video');
                 voicePrompt.textContent = 'Tap "Navigate" and say: "Take me to room 0010" (or type below). Tap "What\'s Ahead" to hear what is in front of you.';
                 connectWebSocket();
@@ -929,6 +932,7 @@
             startBtn.disabled = false;
             stopBtn.disabled = true;
             announceBtn.disabled = true;
+            brailleBtn.disabled = true;
             mapContainer.classList.remove('visible');
         });
 
@@ -1082,6 +1086,54 @@
             if (isProcessing) statusEl.textContent = isNavigating
                 ? '🧭 Navigating to room ' + navDestination
                 : 'Camera on — tap What\'s Ahead for directions';
+        });
+
+        // ─── READ BRAILLE (dedicated braille-only detection) ─────────────
+        brailleBtn.addEventListener('click', async () => {
+            if (!videoEl.videoWidth || !serverUrl) return;
+
+            if (isSpeakingEL) {
+                stopAllAudio();
+                statusEl.textContent = 'Stopped speaking';
+                return;
+            }
+
+            brailleBtn.disabled = true;
+            statusEl.textContent = '⠿ Reading braille…';
+            try {
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 640 / videoEl.videoWidth);
+                canvas.width = videoEl.videoWidth * scale;
+                canvas.height = videoEl.videoHeight * scale;
+                canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.8));
+                const form = new FormData();
+                form.append('file', blob, 'braille.jpg');
+
+                const res = await fetch(serverUrl + '/read-braille', { method: 'POST', body: form });
+                if (!res.ok) throw new Error('Server ' + res.status);
+
+                const data = await res.json();
+                const announcement = data.announcement || "Could not read braille.";
+
+                // Show braille panel
+                if (data.braille_text) {
+                    braillePanel.style.display = 'block';
+                    brailleTextEl.textContent = data.braille_text;
+                } else {
+                    braillePanel.style.display = 'none';
+                    brailleTextEl.textContent = '';
+                }
+
+                statusEl.textContent = '🗣️ Speaking…';
+                await speakWithElevenLabs(announcement);
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = 'Error: ' + err.message;
+                speak("Braille detection failed. Check the server connection.");
+            }
+            brailleBtn.disabled = false;
+            if (isProcessing) statusEl.textContent = 'Camera on — tap Read Braille or What\'s Ahead';
         });
 
         // ─── DETECTIONS LIST ───────────────────────────────────────────

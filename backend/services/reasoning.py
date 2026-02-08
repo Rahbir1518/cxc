@@ -50,7 +50,7 @@ class ObstacleClassifier:
 
     def __init__(self):
         self.client = None
-        self.model_name = "gemini-2.0-flash"  # Use latest model
+        self.model_name = "gemini-2.0-flash"
 
         if GEMINI_AVAILABLE:
             api_key = os.getenv("GOOGLE_GEMINI_API_KEY")
