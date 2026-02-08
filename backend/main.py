@@ -697,13 +697,17 @@ async def websocket_glasses(websocket: WebSocket):
     """
     WebSocket endpoint for Meta Glasses real-time video processing.
 
-    Identical pipeline to /ws/video but:
-    - Uses higher resolution frames (glasses → phone relay → server)
+    Glasses-only pipeline — the user walks freely wearing Meta Ray-Ban glasses.
+    The glasses stream their camera via the Meta View companion app on the phone
+    (phone stays in pocket). ElevenLabs provides real-time audio guidance.
+
+    Pipeline:
+    - Meta Glasses camera → Meta View app → glasses_feed.html → /ws/glasses
     - Includes OCR / text-reading capability on every Nth frame
     - Broadcasts to /ws/glasses-viewer (separate from phone viewers)
 
     Client sends: base64-encoded JPEG frames
-    Server sends: JSON with detections + annotated frame + instruction + text_found
+    Server sends: JSON with detections + raw frame + instruction + text_found
     """
     await glasses_manager.connect(websocket)
 
