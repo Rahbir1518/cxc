@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>DWS — Meta Glasses Feed</title>
+    <title>DWS — Meta Glasses Live AI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -93,35 +93,6 @@
         }
         .server-row input:focus { outline: none; border-color: var(--color-border-hover); }
 
-        .mode-selector {
-            display: flex;
-            gap: 0.5rem;
-            padding: 4px;
-            background: var(--color-bg-card);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-        }
-        .mode-btn {
-            flex: 1;
-            padding: 0.6rem 0.5rem;
-            font-size: 0.8rem;
-            font-weight: 600;
-            font-family: var(--font-sans);
-            border: none;
-            border-radius: var(--radius-md);
-            cursor: pointer;
-            background: transparent;
-            color: var(--color-text-muted);
-            transition: all var(--transition-fast);
-        }
-        .mode-btn.active {
-            background: rgba(191,200,195,0.15);
-            color: var(--color-primary-400);
-        }
-        .mode-btn:hover:not(.active) {
-            color: var(--color-text-secondary);
-        }
-
         .help-text {
             padding: 0.6rem 0.75rem;
             background: var(--color-bg-card);
@@ -132,6 +103,7 @@
             line-height: 1.5;
         }
         .help-text strong { color: var(--color-primary-400); }
+        .help-text .step { color: #93c5fd; font-weight: 600; }
 
         .video-container {
             position: relative;
@@ -252,9 +224,10 @@
     <header>
         <div class="header-brand">
             <span class="glasses-icon">🕶️</span>
-            <h1>DWS — Meta Glasses</h1>
+            <h1>DWS — Meta Glasses Live AI</h1>
         </div>
         <div id="status">Enter server address and connect</div>
+        <div style="font-size:0.7rem; color:var(--color-text-muted); margin-top:2px;">Glasses-only mode — walk freely with real-time AI guidance</div>
     </header>
 
     <div class="container">
@@ -263,18 +236,14 @@
             <button id="connectBtn">Connect</button>
         </div>
 
-        <!-- Capture Mode Selector -->
-        <div class="mode-selector">
-            <button class="mode-btn active" data-mode="camera" id="modeCameraBtn">📷 Camera</button>
-            <button class="mode-btn" data-mode="screen" id="modeScreenBtn">📱 Screen Share</button>
-        </div>
-
         <div id="helpText" class="help-text">
-            <strong>Camera mode:</strong> Uses your iPhone's rear camera directly.
-            Point your phone at the same direction as your Meta Glasses.
+            <strong>How it works:</strong> Your Meta Ray-Ban glasses stream their camera feed directly.
+            <br><span class="step">1.</span> Put on your Meta glasses and open the <strong>Meta View</strong> app on this phone.
+            <br><span class="step">2.</span> Tap <strong>Connect</strong> above, then tap <strong>Start</strong> below.
+            <br><span class="step">3.</span> Put your phone in your pocket — walk freely with glasses only.
             <br><br>
-            <strong>Screen Share mode:</strong> If your Meta View app is showing the glasses' live view,
-            use Screen Share to capture exactly what the glasses see.
+            AI will analyze what your glasses see in real-time and guide you with voice (ElevenLabs).
+            Obstacles, signs, and text are detected automatically.
         </div>
 
         <div id="videoContainer" class="video-container">
@@ -314,8 +283,6 @@
         const detectionList = document.getElementById('detectionList');
         const textReadout = document.getElementById('textReadout');
         const videoContainer = document.getElementById('videoContainer');
-        const modeCameraBtn = document.getElementById('modeCameraBtn');
-        const modeScreenBtn = document.getElementById('modeScreenBtn');
         const helpText = document.getElementById('helpText');
 
         // ─── TUNNEL-SAFE FETCH (bypass localtunnel reminder) ────────
@@ -330,9 +297,13 @@
         let ws = null;
         let stream = null;
         let isProcessing = false;
-        let captureMode = 'camera'; // 'camera' or 'screen'
+        let captureMode = 'camera'; // glasses camera via Meta View
         let lastDetections = [];
         let lastTextFound = '';
+        let lastSpokenInstruction = '';
+        let lastSpeakTime = 0;
+        const SPEAK_COOLDOWN_MS = 4000; // Don't speak more often than every 4 seconds
+        const AUTO_ANNOUNCE = true; // Auto-speak navigation instructions via ElevenLabs
 
         // ─── AUDIO MANAGEMENT ──────────────────────────────
         let currentAudio = null;
@@ -409,20 +380,6 @@
             }
         }
 
-        // ─── MODE SELECTOR ─────────────────────────────────
-        modeCameraBtn.addEventListener('click', () => {
-            captureMode = 'camera';
-            modeCameraBtn.classList.add('active');
-            modeScreenBtn.classList.remove('active');
-            helpText.innerHTML = '<strong>Camera mode:</strong> Uses your iPhone\'s rear camera directly. Point your phone at the same direction as your Meta Glasses.';
-        });
-        modeScreenBtn.addEventListener('click', () => {
-            captureMode = 'screen';
-            modeScreenBtn.classList.add('active');
-            modeCameraBtn.classList.remove('active');
-            helpText.innerHTML = '<strong>Screen Share mode:</strong> Opens your Meta View app, then use Screen Share to capture the glasses\' live view from the Meta View app.';
-        });
-
         // ─── CONNECTION ────────────────────────────────────
         connectBtn.addEventListener('click', () => {
             let url = serverUrlInput.value.trim();
@@ -451,35 +408,25 @@
         // ─── START / STOP ──────────────────────────────────
         startBtn.addEventListener('click', async () => {
             try {
-                if (captureMode === 'screen') {
-                    // Screen capture — captures the Meta View app display
-                    if (!navigator.mediaDevices?.getDisplayMedia) {
-                        alert('Screen sharing is not supported on this browser. Try Camera mode.');
-                        return;
-                    }
-                    stream = await navigator.mediaDevices.getDisplayMedia({
-                        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-                        audio: false
-                    });
-                } else {
-                    // Direct camera — use rear camera on iPhone
-                    if (!navigator.mediaDevices?.getUserMedia) {
-                        alert('Camera not available. Use HTTPS or localhost.');
-                        return;
-                    }
-                    stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
-                        audio: false
-                    });
+                // Use the glasses camera feed via Meta View companion app
+                // The rear camera captures what the glasses see through Meta View's live stream
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    alert('Camera not available. Make sure you are using HTTPS or localhost.');
+                    return;
                 }
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    audio: false
+                });
                 videoEl.srcObject = stream;
                 await videoEl.play();
-                statusEl.textContent = '🕶️ Glasses feed active — streaming to server';
+                statusEl.textContent = '🕶️ Meta Glasses live — AI analyzing your surroundings';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 readTextBtn.disabled = false;
                 announceBtn.disabled = false;
                 videoContainer.classList.add('show-video');
+                helpText.style.display = 'none';
                 connectWebSocket();
             } catch (err) {
                 statusEl.textContent = `Error: ${err.message}`;
@@ -518,7 +465,7 @@
                 isProcessing = true;
                 awaitingResponse = false;
                 startSendLoop();
-                statusEl.textContent = '🕶️ Live — tap Read Text to read signs/labels';
+                statusEl.textContent = '🕶️ Live — walk freely, AI is guiding you';
             };
             ws.onmessage = (ev) => {
                 try {
@@ -540,6 +487,29 @@
                         lastTextFound = data.text_found;
                         updateTextReadout(data.text_found);
                     }
+
+                    // Auto-announce navigation instructions via ElevenLabs
+                    // Only speak when instruction changes and has real content
+                    if (AUTO_ANNOUNCE && data.instruction && data.instruction !== lastSpokenInstruction) {
+                        const now = Date.now();
+                        const isUrgent = data.instruction.toLowerCase().includes('stop') ||
+                                         data.instruction.toLowerCase().includes('caution') ||
+                                         data.instruction.toLowerCase().includes('blocking');
+                        const cooldown = isUrgent ? 2000 : SPEAK_COOLDOWN_MS;
+
+                        if (now - lastSpeakTime >= cooldown) {
+                            // Skip "Path clear" repeats unless it's the first one
+                            const isPathClear = data.instruction.toLowerCase().includes('path clear') ||
+                                                data.instruction.toLowerCase().includes('walk forward') ||
+                                                data.instruction.toLowerCase().includes('continue');
+                            if (!isPathClear || !lastSpokenInstruction.toLowerCase().includes('path clear')) {
+                                lastSpokenInstruction = data.instruction;
+                                lastSpeakTime = now;
+                                speakWithElevenLabs(data.instruction).catch(() => speak(data.instruction));
+                            }
+                        }
+                    }
+
                     awaitingResponse = false;
                 } catch (e) {
                     console.error("WS parse error", e);
@@ -623,7 +593,7 @@
             }
             readTextBtn.disabled = false;
             readTextBtn.classList.remove('reading');
-            if (isProcessing) statusEl.textContent = '🕶️ Live — tap Read Text for text reading';
+            if (isProcessing) statusEl.textContent = '🕶️ Live — walk freely, AI is guiding you';
         });
 
         // ─── ANNOUNCE (What's Ahead) ───────────────────────

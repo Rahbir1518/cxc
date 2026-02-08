@@ -246,8 +246,9 @@ function GlassesViewerInner({
             style={{
               fontSize: "0.75rem",
               color: "var(--color-text-muted)",
-              maxWidth: 300,
+              maxWidth: 320,
               textAlign: "center",
+              lineHeight: 1.5,
             }}
           >
             Open{" "}
@@ -259,7 +260,8 @@ function GlassesViewerInner({
             >
               /static/glasses_feed.html
             </span>{" "}
-            on your iPhone (paired with Meta Glasses) and tap Start
+            on your phone, connect your Meta Glasses via the Meta View app, and tap Start.
+            Put your phone in your pocket — walk freely with glasses only.
           </p>
         </div>
       )}
