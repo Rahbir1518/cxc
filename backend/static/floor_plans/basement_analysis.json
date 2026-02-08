@@ -1,0 +1,474 @@
+{
+  "rooms": [
+    {
+      "id": "room_0806",
+      "label": "0806",
+      "center_x": 350,
+      "center_y": 135,
+      "door_x": 355,
+      "door_y": 172
+    },
+    {
+      "id": "room_0802a",
+      "label": "0802a",
+      "center_x": 393,
+      "center_y": 128,
+      "door_x": 400,
+      "door_y": 168
+    },
+    {
+      "id": "room_0802",
+      "label": "0802",
+      "center_x": 430,
+      "center_y": 128,
+      "door_x": 435,
+      "door_y": 168
+    },
+    {
+      "id": "room_0807",
+      "label": "0807",
+      "center_x": 645,
+      "center_y": 118,
+      "door_x": 645,
+      "door_y": 158
+    },
+    {
+      "id": "room_0028",
+      "label": "0028",
+      "center_x": 340,
+      "center_y": 280,
+      "door_x": 375,
+      "door_y": 240
+    },
+    {
+      "id": "room_0010",
+      "label": "0010",
+      "center_x": 490,
+      "center_y": 270,
+      "door_x": 478,
+      "door_y": 198
+    },
+    {
+      "id": "room_0032",
+      "label": "0032",
+      "center_x": 530,
+      "center_y": 315,
+      "door_x": 540,
+      "door_y": 280
+    },
+    {
+      "id": "room_0020",
+      "label": "0020",
+      "center_x": 555,
+      "center_y": 400,
+      "door_x": 535,
+      "door_y": 350
+    },
+    {
+      "id": "room_0034",
+      "label": "0034",
+      "center_x": 600,
+      "center_y": 340,
+      "door_x": 590,
+      "door_y": 308
+    },
+    {
+      "id": "room_0036",
+      "label": "0036",
+      "center_x": 648,
+      "center_y": 370,
+      "door_x": 645,
+      "door_y": 340
+    },
+    {
+      "id": "room_0030",
+      "label": "0030",
+      "center_x": 565,
+      "center_y": 455,
+      "door_x": 555,
+      "door_y": 420
+    },
+    {
+      "id": "room_0040",
+      "label": "0040",
+      "center_x": 715,
+      "center_y": 405,
+      "door_x": 700,
+      "door_y": 378
+    },
+    {
+      "id": "room_0044",
+      "label": "0044",
+      "center_x": 645,
+      "center_y": 495,
+      "door_x": 648,
+      "door_y": 462
+    },
+    {
+      "id": "room_0050",
+      "label": "0050",
+      "center_x": 815,
+      "center_y": 435,
+      "door_x": 865,
+      "door_y": 425
+    },
+    {
+      "id": "room_0054",
+      "label": "0054",
+      "center_x": 868,
+      "center_y": 268,
+      "door_x": 875,
+      "door_y": 300
+    },
+    {
+      "id": "room_0060",
+      "label": "0060",
+      "center_x": 815,
+      "center_y": 545,
+      "door_x": 865,
+      "door_y": 540
+    },
+    {
+      "id": "room_0064",
+      "label": "0064",
+      "center_x": 918,
+      "center_y": 138,
+      "door_x": 895,
+      "door_y": 155
+    },
+    {
+      "id": "room_0813",
+      "label": "0813",
+      "center_x": 968,
+      "center_y": 165,
+      "door_x": 948,
+      "door_y": 170
+    },
+    {
+      "id": "room_0816",
+      "label": "0816",
+      "center_x": 1020,
+      "center_y": 470,
+      "door_x": 995,
+      "door_y": 470
+    },
+    {
+      "id": "room_0803",
+      "label": "0803",
+      "center_x": 875,
+      "center_y": 595,
+      "door_x": 878,
+      "door_y": 575
+    },
+    {
+      "id": "room_0840",
+      "label": "0840",
+      "center_x": 880,
+      "center_y": 640,
+      "door_x": 878,
+      "door_y": 625
+    },
+    {
+      "id": "room_0811",
+      "label": "0811",
+      "center_x": 918,
+      "center_y": 675,
+      "door_x": 908,
+      "door_y": 658
+    },
+    {
+      "id": "room_0823",
+      "label": "0823",
+      "center_x": 958,
+      "center_y": 692,
+      "door_x": 948,
+      "door_y": 680
+    },
+    {
+      "id": "room_0825",
+      "label": "0825",
+      "center_x": 975,
+      "center_y": 725,
+      "door_x": 968,
+      "door_y": 710
+    }
+  ],
+  "hallway_nodes": [
+    {
+      "id": "hall_1",
+      "x": 338,
+      "y": 182,
+      "description": "West end of top corridor, near closed exit and room 0806"
+    },
+    {
+      "id": "hall_2",
+      "x": 400,
+      "y": 180,
+      "description": "Top corridor near rooms 0802a and 0802"
+    },
+    {
+      "id": "hall_3",
+      "x": 475,
+      "y": 180,
+      "description": "Top corridor junction near room 0010 entrance"
+    },
+    {
+      "id": "hall_4",
+      "x": 545,
+      "y": 178,
+      "description": "Mid top corridor with vertical access to internal halls"
+    },
+    {
+      "id": "hall_5",
+      "x": 635,
+      "y": 172,
+      "description": "Top corridor near room 0807"
+    },
+    {
+      "id": "hall_6",
+      "x": 720,
+      "y": 168,
+      "description": "Top corridor east section"
+    },
+    {
+      "id": "hall_7",
+      "x": 800,
+      "y": 165,
+      "description": "Top corridor approaching northeast corner"
+    },
+    {
+      "id": "hall_8",
+      "x": 878,
+      "y": 162,
+      "description": "Northeast corner junction of top and right corridors"
+    },
+    {
+      "id": "hall_9",
+      "x": 878,
+      "y": 228,
+      "description": "Right corridor upper section"
+    },
+    {
+      "id": "hall_10",
+      "x": 878,
+      "y": 302,
+      "description": "Right corridor near room 0054"
+    },
+    {
+      "id": "hall_11",
+      "x": 878,
+      "y": 370,
+      "description": "Right corridor mid section"
+    },
+    {
+      "id": "hall_12",
+      "x": 878,
+      "y": 425,
+      "description": "Right corridor near room 0050 entrance"
+    },
+    {
+      "id": "hall_13",
+      "x": 878,
+      "y": 490,
+      "description": "Right corridor continuing south"
+    },
+    {
+      "id": "hall_14",
+      "x": 878,
+      "y": 542,
+      "description": "Right corridor near room 0060"
+    },
+    {
+      "id": "hall_15",
+      "x": 878,
+      "y": 585,
+      "description": "Right corridor near room 0803"
+    },
+    {
+      "id": "hall_16",
+      "x": 878,
+      "y": 640,
+      "description": "Right corridor bottom junction near rooms 0840/0811"
+    },
+    {
+      "id": "hall_17",
+      "x": 375,
+      "y": 205,
+      "description": "Internal corridor start, upper-left area"
+    },
+    {
+      "id": "hall_18",
+      "x": 430,
+      "y": 222,
+      "description": "Internal corridor near room 0028"
+    },
+    {
+      "id": "hall_19",
+      "x": 500,
+      "y": 248,
+      "description": "Internal corridor between rooms 0010 and 0032"
+    },
+    {
+      "id": "hall_20",
+      "x": 548,
+      "y": 275,
+      "description": "Internal corridor junction near room 0032"
+    },
+    {
+      "id": "hall_21",
+      "x": 585,
+      "y": 305,
+      "description": "Internal corridor near room 0034"
+    },
+    {
+      "id": "hall_22",
+      "x": 635,
+      "y": 338,
+      "description": "Internal corridor near room 0036"
+    },
+    {
+      "id": "hall_23",
+      "x": 695,
+      "y": 370,
+      "description": "Internal corridor near room 0040"
+    },
+    {
+      "id": "hall_24",
+      "x": 770,
+      "y": 400,
+      "description": "Internal corridor connecting to right wing"
+    },
+    {
+      "id": "hall_25",
+      "x": 542,
+      "y": 342,
+      "description": "Cross corridor junction near room 0020 entrance"
+    },
+    {
+      "id": "hall_26",
+      "x": 558,
+      "y": 410,
+      "description": "Cross corridor near room 0030"
+    },
+    {
+      "id": "hall_27",
+      "x": 640,
+      "y": 440,
+      "description": "Cross corridor near room 0044"
+    },
+    {
+      "id": "hall_28",
+      "x": 725,
+      "y": 448,
+      "description": "Cross corridor connecting center to east wing"
+    },
+    {
+      "id": "hall_29",
+      "x": 910,
+      "y": 155,
+      "description": "Top right area connecting to rooms 0064 and 0813"
+    },
+    {
+      "id": "hall_30",
+      "x": 955,
+      "y": 470,
+      "description": "Far right corridor connecting to room 0816 (Biology 1)"
+    },
+    {
+      "id": "hall_31",
+      "x": 895,
+      "y": 648,
+      "description": "Bottom right corridor junction"
+    },
+    {
+      "id": "hall_32",
+      "x": 935,
+      "y": 668,
+      "description": "Bottom right corridor near rooms 0811/0823"
+    },
+    {
+      "id": "hall_33",
+      "x": 960,
+      "y": 700,
+      "description": "Bottom far right near room 0825"
+    },
+    {
+      "id": "hall_34",
+      "x": 805,
+      "y": 438,
+      "description": "Corridor linking internal path to east wing entrance"
+    }
+  ],
+  "connections": [
+    {"from": "room_0806", "to": "hall_1"},
+    {"from": "room_0802a", "to": "hall_2"},
+    {"from": "room_0802", "to": "hall_2"},
+    {"from": "room_0807", "to": "hall_5"},
+    {"from": "room_0028", "to": "hall_18"},
+    {"from": "room_0010", "to": "hall_3"},
+    {"from": "room_0032", "to": "hall_20"},
+    {"from": "room_0020", "to": "hall_25"},
+    {"from": "room_0034", "to": "hall_21"},
+    {"from": "room_0036", "to": "hall_22"},
+    {"from": "room_0030", "to": "hall_26"},
+    {"from": "room_0040", "to": "hall_23"},
+    {"from": "room_0044", "to": "hall_27"},
+    {"from": "room_0050", "to": "hall_12"},
+    {"from": "room_0054", "to": "hall_10"},
+    {"from": "room_0060", "to": "hall_14"},
+    {"from": "room_0064", "to": "hall_29"},
+    {"from": "room_0813", "to": "hall_29"},
+    {"from": "room_0816", "to": "hall_30"},
+    {"from": "room_0803", "to": "hall_15"},
+    {"from": "room_0840", "to": "hall_16"},
+    {"from": "room_0811", "to": "hall_32"},
+    {"from": "room_0823", "to": "hall_32"},
+    {"from": "room_0825", "to": "hall_33"},
+
+    {"from": "hall_1", "to": "hall_2"},
+    {"from": "hall_2", "to": "hall_3"},
+    {"from": "hall_3", "to": "hall_4"},
+    {"from": "hall_4", "to": "hall_5"},
+    {"from": "hall_5", "to": "hall_6"},
+    {"from": "hall_6", "to": "hall_7"},
+    {"from": "hall_7", "to": "hall_8"},
+
+    {"from": "hall_8", "to": "hall_9"},
+    {"from": "hall_9", "to": "hall_10"},
+    {"from": "hall_10", "to": "hall_11"},
+    {"from": "hall_11", "to": "hall_12"},
+    {"from": "hall_12", "to": "hall_13"},
+    {"from": "hall_13", "to": "hall_14"},
+    {"from": "hall_14", "to": "hall_15"},
+    {"from": "hall_15", "to": "hall_16"},
+
+    {"from": "hall_1", "to": "hall_17"},
+    {"from": "hall_17", "to": "hall_18"},
+    {"from": "hall_18", "to": "hall_19"},
+    {"from": "hall_19", "to": "hall_20"},
+    {"from": "hall_20", "to": "hall_21"},
+    {"from": "hall_21", "to": "hall_22"},
+    {"from": "hall_22", "to": "hall_23"},
+    {"from": "hall_23", "to": "hall_24"},
+    {"from": "hall_24", "to": "hall_11"},
+
+    {"from": "hall_3", "to": "hall_19"},
+    {"from": "hall_4", "to": "hall_20"},
+
+    {"from": "hall_20", "to": "hall_25"},
+    {"from": "hall_25", "to": "hall_26"},
+    {"from": "hall_26", "to": "hall_27"},
+    {"from": "hall_27", "to": "hall_28"},
+    {"from": "hall_28", "to": "hall_34"},
+    {"from": "hall_34", "to": "hall_12"},
+
+    {"from": "hall_8", "to": "hall_29"},
+    {"from": "hall_13", "to": "hall_30"},
+    {"from": "hall_16", "to": "hall_31"},
+    {"from": "hall_31", "to": "hall_32"},
+    {"from": "hall_32", "to": "hall_33"},
+
+    {"from": "hall_22", "to": "hall_27"},
+    {"from": "hall_23", "to": "hall_28"}
+  ]
+}

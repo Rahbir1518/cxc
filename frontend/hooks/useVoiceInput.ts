@@ -1,1 +1,4 @@
-console.log("This is useVoiceInput.ts");
+export function useVoiceInput() {
+  // Placeholder hook
+  return { transcript: "", isListening: false };
+}

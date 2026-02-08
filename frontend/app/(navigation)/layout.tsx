@@ -1,1 +1,11 @@
-console.log("This is layout.tsx");
+export default function NavigationLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-slate-950 text-white">
+      {children}
+    </div>
+  );
+}
