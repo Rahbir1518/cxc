@@ -299,8 +299,8 @@ async def navigate(request: NavigateRequest):
         "path": path,
         "instruction": (
             f"Heading from room {start_room} to room {destination}. "
-            f"I will tell you when to turn and when to watch for obstacles. "
-            f"Start walking forward and tap Announce anytime to hear what is in front of you."
+            f"I will guide you every 3 seconds with step-by-step directions. "
+            f"Start walking forward."
         ),
     }
 
