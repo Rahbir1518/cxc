@@ -488,6 +488,13 @@
         const progressText = document.getElementById('progressText');
         const etaText = document.getElementById('etaText');
 
+        // ─── TUNNEL-SAFE FETCH (bypass localtunnel reminder) ────────
+        const tunnelHeaders = { 'Bypass-Tunnel-Reminder': 'true' };
+        function tfetch(url, opts = {}) {
+            opts.headers = { ...tunnelHeaders, ...(opts.headers || {}) };
+            return fetch(url, opts);
+        }
+
         const START_ROOM = '0020';
         const SVG_WIDTH = 1224;
         const SVG_HEIGHT = 792;
@@ -542,7 +549,7 @@
             announceBtn.classList.add('speaking');
 
             try {
-                const res = await fetch(serverUrl + '/announce', {
+                const res = await tfetch(serverUrl + '/announce', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text })
@@ -865,10 +872,17 @@
         connectBtn.addEventListener('click', () => {
             let url = serverUrlInput.value.trim();
             if (!url) { alert('Enter server address'); return; }
-            if (!url.startsWith('http')) url = 'http://' + url;
-            serverUrl = url;
+            if (!url.startsWith('http')) {
+                // Default to https if it looks like a tunnel domain
+                if (url.includes('.loca.lt') || url.includes('.ngrok') || url.includes('.trycloudflare.com')) {
+                    url = 'https://' + url;
+                } else {
+                    url = 'http://' + url;
+                }
+            }
+            serverUrl = url.replace(/\/+$/, ''); // Remove trailing slashes
 
-            fetch(`${serverUrl}/health`)
+            tfetch(`${serverUrl}/health`)
                 .then(res => res.json())
                 .then(() => {
                     statusEl.textContent = '✓ Connected';
@@ -1044,7 +1058,7 @@
                 form.append('file', blob, 'scene.jpg');
                 if (isNavigating && navDestination) form.append('navigation_context', 'User is heading to room ' + navDestination + '. Give verbal directions: say how many steps left or right if something is in the way.');
 
-                const res = await fetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
+                const res = await tfetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
                 if (!res.ok) throw new Error('Server ' + res.status);
 
                 const data = await res.json();
@@ -1134,7 +1148,7 @@
         async function parseNavigationCommand(text) {
             statusEl.textContent = 'Finding route…';
             try {
-                const res = await fetch(`${serverUrl}/navigate`, {
+                const res = await tfetch(`${serverUrl}/navigate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ text: text, start_room: START_ROOM })
@@ -1214,7 +1228,7 @@
                     form.append('file', blob, 'scene.jpg');
                     form.append('navigation_context', navContext);
 
-                    const res = await fetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
+                    const res = await tfetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
                     const data = await res.json();
                     const announcement = data.announcement;
                     if (announcement && !isSpeakingEL) {
@@ -1229,11 +1243,23 @@
         window.addEventListener('load', () => {
             const host = window.location.hostname;
             const port = window.location.port;
-            if (host !== 'localhost' && host !== '127.0.0.1') serverUrlInput.value = host + ':8000';
-            else serverUrlInput.value = 'localhost:8000';
-            if (port === '8000' || window.location.origin.includes('8000')) {
+            const proto = window.location.protocol;
+            const isTunnel = proto === 'https:' && (!port || port === '443');
+            const isLocal8000 = port === '8000' || window.location.origin.includes('8000');
+
+            if (isTunnel) {
+                // Accessed via localtunnel / ngrok — origin IS the server
+                serverUrlInput.value = window.location.origin;
                 serverUrl = window.location.origin;
                 setMapSource();
+            } else if (isLocal8000) {
+                serverUrlInput.value = window.location.origin;
+                serverUrl = window.location.origin;
+                setMapSource();
+            } else if (host !== 'localhost' && host !== '127.0.0.1') {
+                serverUrlInput.value = host + ':8000';
+            } else {
+                serverUrlInput.value = 'localhost:8000';
             }
         });
     </script>
