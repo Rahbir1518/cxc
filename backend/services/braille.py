@@ -28,12 +28,14 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-# ── Roboflow SDK (optional) ──
-try:
-    from roboflow import Roboflow
-    ROBOFLOW_AVAILABLE = True
-except ImportError:
-    ROBOFLOW_AVAILABLE = False
+# ── Roboflow SDK (optional — only loaded if API key is present) ──
+ROBOFLOW_AVAILABLE = False
+if os.getenv("ROBOFLOW_API_KEY"):
+    try:
+        from roboflow import Roboflow
+        ROBOFLOW_AVAILABLE = True
+    except ImportError:
+        pass
 
 # ── Constants ──
 BRAILLE_TIMEOUT_S = 10.0

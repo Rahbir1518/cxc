@@ -378,6 +378,7 @@ async def analyze_and_announce(
     
     # ── Run scene reasoning AND braille detection IN PARALLEL ──
     # This adds zero extra latency — both calls execute concurrently.
+    # return_exceptions=True ensures braille errors NEVER break the normal announcement.
     braille_reader = get_braille_reader()
     
     announcement_task = classifier.reason_with_gemini(
@@ -387,9 +388,22 @@ async def analyze_and_announce(
     )
     braille_task = braille_reader.detect_and_read(pil_image)
     
-    announcement, braille_text = await asyncio.gather(
-        announcement_task, braille_task
+    results = await asyncio.gather(
+        announcement_task, braille_task,
+        return_exceptions=True,
     )
+    
+    # Safely unpack — if either task raised, treat it as None/fallback
+    announcement = results[0]
+    braille_text = results[1]
+    
+    if isinstance(announcement, BaseException):
+        print(f"⚠️ Scene reasoning failed: {announcement}")
+        announcement = classifier.generate_navigation_instruction(detection_dicts)
+    
+    if isinstance(braille_text, BaseException):
+        print(f"⚠️ Braille detection failed: {braille_text}")
+        braille_text = None
     
     # ── If braille was found, append the reading to the announcement ──
     if braille_text:
