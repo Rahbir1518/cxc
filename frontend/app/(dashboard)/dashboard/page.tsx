@@ -486,9 +486,9 @@ export default function DashboardPage() {
               <div className="flex flex-col items-center justify-center h-full gap-4" style={{ color: "var(--color-text-muted)" }}>
                 <Video className="h-16 w-16" style={{ opacity: 0.3 }} />
                 <p style={{ fontSize: "0.9375rem" }}>Camera feed will appear here</p>
-                <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)", maxWidth: 360, textAlign: "center" }}>
+                <p style={{ fontSize: "0.8125rem", color: "var(--color-text-muted)", maxWidth: 380, textAlign: "center" }}>
                   Open <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-primary-400)" }}>/static/camera_test.html</span> on your phone,{" "}
-                  <span style={{ fontFamily: "var(--font-mono)", color: "#93c5fd" }}>/static/glasses_feed.html</span> for Meta Glasses (glasses-only, walk freely), or use the local webcam
+                  <span style={{ fontFamily: "var(--font-mono)", color: "#93c5fd" }}>/static/glasses_feed.html</span> on this PC to capture a Meta Glasses video call, or use the local webcam
                 </p>
                 {isConnected && (
                   <div className="flex gap-3 flex-wrap justify-center">

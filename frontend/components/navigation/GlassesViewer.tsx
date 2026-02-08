@@ -246,9 +246,9 @@ function GlassesViewerInner({
             style={{
               fontSize: "0.75rem",
               color: "var(--color-text-muted)",
-              maxWidth: 320,
+              maxWidth: 340,
               textAlign: "center",
-              lineHeight: 1.5,
+              lineHeight: 1.6,
             }}
           >
             Open{" "}
@@ -260,8 +260,8 @@ function GlassesViewerInner({
             >
               /static/glasses_feed.html
             </span>{" "}
-            on your phone, connect your Meta Glasses via the Meta View app, and tap Start.
-            Put your phone in your pocket — walk freely with glasses only.
+            on this computer. Start a video call from your Meta Glasses
+            (WhatsApp/Messenger), answer on this PC, then capture the call window.
           </p>
         </div>
       )}

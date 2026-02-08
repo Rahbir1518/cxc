@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DWS — Meta Glasses Live AI</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,9 +52,7 @@
             gap: 0.5rem;
             margin-bottom: 0.25rem;
         }
-        .glasses-icon {
-            font-size: 1.4rem;
-        }
+        .glasses-icon { font-size: 1.4rem; }
         h1 {
             font-size: 1.1rem;
             font-weight: 700;
@@ -70,12 +68,20 @@
             font-family: var(--font-mono);
             font-weight: 500;
         }
+        .subtitle {
+            font-size: 0.7rem;
+            color: var(--color-text-muted);
+            margin-top: 2px;
+        }
         .container {
             flex: 1;
             display: flex;
             flex-direction: column;
             padding: 0.75rem;
             gap: 0.75rem;
+            max-width: 900px;
+            margin: 0 auto;
+            width: 100%;
         }
         .server-row {
             display: flex;
@@ -94,16 +100,24 @@
         .server-row input:focus { outline: none; border-color: var(--color-border-hover); }
 
         .help-text {
-            padding: 0.6rem 0.75rem;
+            padding: 0.75rem 1rem;
             background: var(--color-bg-card);
             border: 1px solid var(--color-border);
             border-radius: var(--radius-md);
-            font-size: 0.78rem;
+            font-size: 0.82rem;
             color: var(--color-text-muted);
-            line-height: 1.5;
+            line-height: 1.6;
         }
         .help-text strong { color: var(--color-primary-400); }
-        .help-text .step { color: #93c5fd; font-weight: 600; }
+        .help-text .step { color: #93c5fd; font-weight: 700; font-size: 0.9rem; }
+        .help-text .highlight {
+            color: var(--color-text-secondary);
+            background: rgba(147,197,253,0.08);
+            padding: 1px 5px;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+        }
 
         .video-container {
             position: relative;
@@ -111,18 +125,47 @@
             border-radius: var(--radius-lg);
             overflow: hidden;
             flex: 1;
-            min-height: 220px;
+            min-height: 360px;
             border: 1px solid var(--color-border);
         }
         #videoElement, #processedFrame {
             position: absolute;
             top: 0; left: 0;
             width: 100%; height: 100%;
-            object-fit: cover;
+            object-fit: contain;
         }
         #videoElement { z-index: 0; }
         #processedFrame { z-index: 1; background: #000; }
         .video-container.show-video #processedFrame { opacity: 0; pointer-events: none; }
+
+        .live-badge {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 5;
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background: rgba(10,14,12,0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(134,239,172,0.3);
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            color: #86efac;
+        }
+        .live-badge.active { display: flex; }
+        .live-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #86efac;
+            animation: pulse-dot 2s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
 
         .controls {
             display: flex;
@@ -147,8 +190,9 @@
             color: var(--color-bg-primary);
         }
         #startBtn {
-            background: var(--gradient-smoke);
-            color: var(--color-bg-primary);
+            background: linear-gradient(135deg, #93c5fd 0%, #60a5fa 100%);
+            color: #0a0e0c;
+            font-weight: 700;
         }
         #stopBtn {
             background: rgba(252,165,165,0.15);
@@ -160,9 +204,7 @@
             color: #93c5fd;
             border: 1px solid rgba(147,197,253,0.2);
         }
-        #readTextBtn:not(:disabled):hover {
-            background: rgba(147,197,253,0.25);
-        }
+        #readTextBtn:not(:disabled):hover { background: rgba(147,197,253,0.25); }
         #readTextBtn.reading {
             animation: pulse-read 1s ease-in-out infinite;
         }
@@ -183,6 +225,14 @@
             50% { box-shadow: 0 0 20px 4px rgba(191,200,195,0.4); }
         }
 
+        .panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+        }
+        @media (max-width: 600px) {
+            .panels { grid-template-columns: 1fr; }
+        }
         .info-panel {
             background: var(--color-bg-card);
             border: 1px solid var(--color-border);
@@ -226,46 +276,60 @@
             <span class="glasses-icon">🕶️</span>
             <h1>DWS — Meta Glasses Live AI</h1>
         </div>
-        <div id="status">Enter server address and connect</div>
-        <div style="font-size:0.7rem; color:var(--color-text-muted); margin-top:2px;">Glasses-only mode — walk freely with real-time AI guidance</div>
+        <div id="status">Open this on your computer — no phone needed</div>
+        <div class="subtitle">Captures your Meta Glasses view from a WhatsApp / Messenger video call</div>
     </header>
 
     <div class="container">
         <div class="server-row">
-            <input type="text" id="serverUrl" placeholder="Server (e.g. 192.168.1.100:8000)" value="">
+            <input type="text" id="serverUrl" placeholder="Server (e.g. localhost:8000)" value="">
             <button id="connectBtn">Connect</button>
         </div>
 
         <div id="helpText" class="help-text">
-            <strong>How it works:</strong> Your Meta Ray-Ban glasses stream their camera feed directly.
-            <br><span class="step">1.</span> Put on your Meta glasses and open the <strong>Meta View</strong> app on this phone.
-            <br><span class="step">2.</span> Tap <strong>Connect</strong> above, then tap <strong>Start</strong> below.
-            <br><span class="step">3.</span> Put your phone in your pocket — walk freely with glasses only.
+            <strong>How it works:</strong> Your Meta Glasses stream their camera via a video call. This page captures that feed on your computer for AI analysis.
             <br><br>
-            AI will analyze what your glasses see in real-time and guide you with voice (ElevenLabs).
-            Obstacles, signs, and text are detected automatically.
+            <span class="step">1.</span> Put on your Meta Ray-Ban glasses.
+            <br>
+            <span class="step">2.</span> Say <strong>"Hey Meta, video call [contact] on WhatsApp"</strong> (or Messenger).
+            <br>
+            <span class="step">3.</span> Answer the call on <span class="highlight">WhatsApp Web</span> or <span class="highlight">Messenger</span> on this computer.
+            <br>
+            <span class="step">4.</span> Click <strong>Connect</strong> above, then <strong>Start Capture</strong> below.
+            <br>
+            <span class="step">5.</span> Select the <strong>WhatsApp/Messenger window or tab</strong> showing the glasses' camera view.
+            <br><br>
+            AI will analyze what your glasses see and speak directions aloud via ElevenLabs.
+            The audio plays on this computer and travels back through the video call to your glasses' speakers.
+            <br><br>
+            <em style="color:var(--color-text-muted);font-size:0.75rem;">No HTTPS required — runs on localhost. No phone camera needed.</em>
         </div>
 
         <div id="videoContainer" class="video-container">
-            <video id="videoElement" autoplay playsinline></video>
+            <video id="videoElement" autoplay playsinline muted></video>
             <img id="processedFrame" alt="Processed feed from Meta Glasses">
+            <div id="liveBadge" class="live-badge">
+                <div class="live-dot"></div>
+                <span>LIVE — <span id="fpsCounter">0</span> fps</span>
+            </div>
         </div>
 
         <div class="controls">
-            <button id="startBtn" disabled>🕶️ Start</button>
+            <button id="startBtn" disabled>🕶️ Start Capture</button>
             <button id="stopBtn" disabled>⏹ Stop</button>
             <button id="readTextBtn" disabled>📖 Read Text</button>
             <button id="announceBtn" disabled>🔊 What's Ahead</button>
         </div>
 
-        <div class="info-panel">
-            <h2>📖 Text Reading</h2>
-            <div id="textReadout"><em style="color:var(--color-text-muted)">Tap "Read Text" to read visible text aloud.</em></div>
-        </div>
-
-        <div class="info-panel">
-            <h2>Detected Objects</h2>
-            <div id="detectionList">Start feed to see detections.</div>
+        <div class="panels">
+            <div class="info-panel">
+                <h2>📖 Text Reading</h2>
+                <div id="textReadout"><em style="color:var(--color-text-muted)">Click "Read Text" to read visible text aloud.</em></div>
+            </div>
+            <div class="info-panel">
+                <h2>Detected Objects</h2>
+                <div id="detectionList">Start capture to see detections.</div>
+            </div>
         </div>
     </div>
 
@@ -284,8 +348,10 @@
         const textReadout = document.getElementById('textReadout');
         const videoContainer = document.getElementById('videoContainer');
         const helpText = document.getElementById('helpText');
+        const liveBadge = document.getElementById('liveBadge');
+        const fpsCounter = document.getElementById('fpsCounter');
 
-        // ─── TUNNEL-SAFE FETCH (bypass localtunnel reminder) ────────
+        // ─── TUNNEL-SAFE FETCH ──────────────────────────────
         const tunnelHeaders = { 'Bypass-Tunnel-Reminder': 'true' };
         function tfetch(url, opts = {}) {
             opts.headers = { ...tunnelHeaders, ...(opts.headers || {}) };
@@ -297,13 +363,14 @@
         let ws = null;
         let stream = null;
         let isProcessing = false;
-        let captureMode = 'camera'; // glasses camera via Meta View
         let lastDetections = [];
         let lastTextFound = '';
         let lastSpokenInstruction = '';
         let lastSpeakTime = 0;
-        const SPEAK_COOLDOWN_MS = 4000; // Don't speak more often than every 4 seconds
-        const AUTO_ANNOUNCE = true; // Auto-speak navigation instructions via ElevenLabs
+        let frameCount = 0;
+        let fpsStartTime = Date.now();
+        const SPEAK_COOLDOWN_MS = 4000;
+        const AUTO_ANNOUNCE = true;
 
         // ─── AUDIO MANAGEMENT ──────────────────────────────
         let currentAudio = null;
@@ -326,7 +393,7 @@
             if (!text) return;
             stopAllAudio();
             const u = new SpeechSynthesisUtterance(text);
-            u.rate = 0.85; // Slightly slower for visually impaired
+            u.rate = 0.85;
             speechSynthesis.speak(u);
         }
 
@@ -408,28 +475,46 @@
         // ─── START / STOP ──────────────────────────────────
         startBtn.addEventListener('click', async () => {
             try {
-                // Use the glasses camera feed via Meta View companion app
-                // The rear camera captures what the glasses see through Meta View's live stream
-                if (!navigator.mediaDevices?.getUserMedia) {
-                    alert('Camera not available. Make sure you are using HTTPS or localhost.');
+                // Screen capture — captures the WhatsApp/Messenger video call window
+                // showing the Meta Glasses camera feed. Works on localhost (no HTTPS).
+                if (!navigator.mediaDevices?.getDisplayMedia) {
+                    alert('Screen capture is not supported in this browser. Use Chrome or Edge.');
                     return;
                 }
-                stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 15, max: 30 }
+                    },
                     audio: false
                 });
+
+                // Detect when user stops sharing via browser UI
+                stream.getVideoTracks()[0].addEventListener('ended', () => {
+                    stopBtn.click();
+                });
+
                 videoEl.srcObject = stream;
                 await videoEl.play();
-                statusEl.textContent = '🕶️ Meta Glasses live — AI analyzing your surroundings';
+                statusEl.textContent = '🕶️ Capturing glasses view — AI analyzing in real-time';
+                statusEl.style.color = '#93c5fd';
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
                 readTextBtn.disabled = false;
                 announceBtn.disabled = false;
                 videoContainer.classList.add('show-video');
                 helpText.style.display = 'none';
+                liveBadge.classList.add('active');
+                frameCount = 0;
+                fpsStartTime = Date.now();
                 connectWebSocket();
             } catch (err) {
-                statusEl.textContent = `Error: ${err.message}`;
+                if (err.name === 'NotAllowedError') {
+                    statusEl.textContent = 'Cancelled — select a window to capture';
+                } else {
+                    statusEl.textContent = `Error: ${err.message}`;
+                }
                 statusEl.style.color = '#fca5a5';
             }
         });
@@ -442,10 +527,13 @@
             if (ws) { ws.close(); ws = null; }
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             statusEl.textContent = 'Stopped';
+            statusEl.style.color = 'var(--color-primary-400)';
             startBtn.disabled = false;
             stopBtn.disabled = true;
             readTextBtn.disabled = true;
             announceBtn.disabled = true;
+            liveBadge.classList.remove('active');
+            helpText.style.display = '';
         });
 
         // ─── WEBSOCKET (glasses-specific endpoint) ─────────
@@ -456,7 +544,7 @@
 
         const sendCanvas = document.createElement('canvas');
         const sendCtx = sendCanvas.getContext('2d');
-        const SEND_WIDTH = 480; // Higher res for text reading
+        const SEND_WIDTH = 480;
 
         function connectWebSocket() {
             const wsUrl = serverUrl.replace('http', 'ws') + '/ws/glasses';
@@ -465,7 +553,8 @@
                 isProcessing = true;
                 awaitingResponse = false;
                 startSendLoop();
-                statusEl.textContent = '🕶️ Live — walk freely, AI is guiding you';
+                statusEl.textContent = '🕶️ Live — AI is guiding you through the glasses';
+                statusEl.style.color = '#86efac';
             };
             ws.onmessage = (ev) => {
                 try {
@@ -474,6 +563,15 @@
 
                     const rtt = Date.now() - sendTimestamp;
                     adaptiveInterval = Math.max(100, Math.min(1000, Math.round(rtt * 1.6)));
+
+                    // FPS counter
+                    frameCount++;
+                    const elapsed = (Date.now() - fpsStartTime) / 1000;
+                    if (elapsed >= 1) {
+                        fpsCounter.textContent = Math.round(frameCount / elapsed);
+                        frameCount = 0;
+                        fpsStartTime = Date.now();
+                    }
 
                     if (data.frame_base64) {
                         processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
@@ -489,7 +587,6 @@
                     }
 
                     // Auto-announce navigation instructions via ElevenLabs
-                    // Only speak when instruction changes and has real content
                     if (AUTO_ANNOUNCE && data.instruction && data.instruction !== lastSpokenInstruction) {
                         const now = Date.now();
                         const isUrgent = data.instruction.toLowerCase().includes('stop') ||
@@ -498,7 +595,6 @@
                         const cooldown = isUrgent ? 2000 : SPEAK_COOLDOWN_MS;
 
                         if (now - lastSpeakTime >= cooldown) {
-                            // Skip "Path clear" repeats unless it's the first one
                             const isPathClear = data.instruction.toLowerCase().includes('path clear') ||
                                                 data.instruction.toLowerCase().includes('walk forward') ||
                                                 data.instruction.toLowerCase().includes('continue');
@@ -555,7 +651,7 @@
                     ws.send(reader.result.split(',')[1]);
                 };
                 reader.readAsDataURL(blob);
-            }, 'image/jpeg', 0.50); // Higher quality for text readability
+            }, 'image/jpeg', 0.55);
         }
 
         // ─── READ TEXT (OCR) ───────────────────────────────
@@ -567,7 +663,6 @@
             readTextBtn.classList.add('reading');
             statusEl.textContent = '📖 Reading text...';
             try {
-                // Capture high-res frame for OCR
                 const canvas = document.createElement('canvas');
                 const scale = Math.min(1, 1280 / videoEl.videoWidth);
                 canvas.width = videoEl.videoWidth * scale;
@@ -593,7 +688,7 @@
             }
             readTextBtn.disabled = false;
             readTextBtn.classList.remove('reading');
-            if (isProcessing) statusEl.textContent = '🕶️ Live — walk freely, AI is guiding you';
+            if (isProcessing) statusEl.textContent = '🕶️ Live — AI is guiding you through the glasses';
         });
 
         // ─── ANNOUNCE (What's Ahead) ───────────────────────
@@ -661,7 +756,6 @@
             const isLocal8000 = port === '8000' || window.location.origin.includes('8000');
 
             if (isTunnel) {
-                // Accessed via localtunnel / ngrok — origin IS the server
                 serverUrlInput.value = window.location.origin;
                 serverUrl = window.location.origin;
             } else if (isLocal8000) {
