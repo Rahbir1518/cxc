@@ -69,7 +69,14 @@ class ObstacleClassifier:
             else:
                 print("⚠️ GOOGLE_GEMINI_API_KEY not configured — using rule-based reasoning")
 
+    # Average step length in meters (used to convert distances to steps)
+    STEP_LENGTH_M = 0.75
+
     # ───────────────────── helpers ─────────────────────
+
+    def meters_to_steps(self, meters: float) -> int:
+        """Convert a distance in meters to approximate number of steps (min 1)."""
+        return max(1, round(meters / self.STEP_LENGTH_M))
 
     def get_position(self, center_x: float, frame_width: int = 640) -> str:
         """Determine if object is left, centre, or right."""
@@ -192,14 +199,13 @@ class ObstacleClassifier:
 
     def generate_navigation_instruction(self, detections: List[Dict[str, Any]]) -> str:
         """
-        Generate a concise verbal instruction.
+        Generate a concise verbal instruction using step-based distances.
 
-        Key improvement: uses bounding-box corridor coverage so objects
-        that only partially overlap the walking path don't trigger
-        unnecessary "step left / step right" commands.
+        Converts metre distances to approximate walking steps so the user
+        hears e.g. "Go 3 steps forward" or "Take 2 steps to your right".
         """
         if not detections:
-            return "Path clear. Walk forward."
+            return "Path clear. Go 3 steps forward."
 
         classified = self.classify_all(detections)
         blocking   = [d for d in classified if d["is_blocking_path"]]
@@ -216,8 +222,9 @@ class ObstacleClassifier:
                 closest = min(nearby, key=lambda x: x["distance"])
                 label = closest.get("label", "object")
                 pos   = closest.get("position", "side")
-                return f"{label} on your {pos}, but path is clear. Continue forward."
-            return "Path clear. Walk forward."
+                steps = self.meters_to_steps(closest["distance"])
+                return f"{label} on your {pos}, {steps} step{'s' if steps != 1 else ''} away. Path is clear, keep walking forward."
+            return "Path clear. Go 3 steps forward."
 
         # ── Something IS blocking ──
         blocking.sort(key=lambda x: x["distance"])
@@ -225,36 +232,39 @@ class ObstacleClassifier:
         label    = closest.get("label", "object")
         dist     = closest["distance"]
         coverage = closest.get("corridor_coverage", 1.0)
+        steps_away = self.meters_to_steps(dist)
 
         # Determine which side is clear
         clear_side = self.get_clear_side(closest)
+        side_steps = max(1, 2 if coverage >= 0.60 else 1)
+
         if clear_side == "left":
-            side_instruction = "Pass on your left."
+            side_instruction = f"Take {side_steps} step{'s' if side_steps != 1 else ''} to your left."
         elif clear_side == "right":
-            side_instruction = "Pass on your right."
+            side_instruction = f"Take {side_steps} step{'s' if side_steps != 1 else ''} to your right."
         else:
-            side_instruction = "Step aside."
+            side_instruction = f"Take {side_steps} step{'s' if side_steps != 1 else ''} to your right."
 
         # ── Partially blocking (coverage 25-60 %) — room to squeeze past ──
         if coverage < 0.60:
             if dist < self.DANGER_DISTANCE:
-                return f"Caution, {label} close ahead. {side_instruction}"
-            return f"{label} partially ahead. {side_instruction}"
+                return f"Caution, {label} {steps_away} step{'s' if steps_away != 1 else ''} ahead. {side_instruction}"
+            return f"{label} {steps_away} step{'s' if steps_away != 1 else ''} ahead. {side_instruction}"
 
         # ── Heavily blocking (coverage ≥ 60 %) — need to step around ──
         if dist < self.DANGER_DISTANCE:
             return (
                 f"Stop. {label} blocking your path. "
-                f"Take 2 steps to your {clear_side or 'right'}."
+                f"{side_instruction}"
             )
         elif dist < self.WARNING_DISTANCE:
             return (
-                f"Caution. {label} ahead, about {dist:.0f} meter. "
-                f"Step to your {clear_side or 'right'}."
+                f"Caution. {label} {steps_away} step{'s' if steps_away != 1 else ''} ahead. "
+                f"{side_instruction}"
             )
         return (
-            f"{label} in your path, about {dist:.0f} meters. "
-            f"Move to your {clear_side or 'right'}."
+            f"{label} in your path, about {steps_away} steps ahead. "
+            f"{side_instruction}"
         )
 
     async def get_navigation_intent(self, user_text: str) -> Dict[str, Any]:
@@ -373,22 +383,40 @@ Room numbers are typically 3-4 digit strings like "0020" or "0010".
 
             context_str = "\n".join(scene_desc) if scene_desc else "No objects detected."
 
+            # Convert distances to steps for the prompt
+            step_context = []
+            for d in relevant:
+                label_   = d.get("label", "object")
+                dist_    = d.get("distance", 0)
+                steps_   = max(1, round(dist_ / self.STEP_LENGTH_M))
+                pos_     = d.get("position", "unknown")
+                blocking_ = d.get("is_blocking_path", False)
+                step_context.append(
+                    f"- {label_}: {steps_} step{'s' if steps_ != 1 else ''} away, on the {pos_}, "
+                    f"{'BLOCKING path' if blocking_ else 'not blocking'}"
+                )
+            step_context_str = "\n".join(step_context) if step_context else "No objects nearby."
+
             prompt = f"""
 You are a sighted guide speaking to a blind person. They will hear your words only (no screen).
 Navigation goal: {navigation_context}
 
-Detected objects (approximate distances and path coverage):
+Detected objects (distances in walking steps, 1 step ≈ 0.75 meters):
+{step_context_str}
+
+Raw data for reference:
 {context_str}
 
 Look at the IMAGE and the data. Give ONE short verbal instruction to speak aloud.
 
 RULES:
-- CRITICAL: If an object is on the LEFT or RIGHT side and covers LESS THAN 50% of the walking path, the user has enough room to walk. Say "Path is clear" or "{label} on your left/right, keep walking." Do NOT tell them to step aside when there is room.
-- Only tell the user to step left/right when an object covers MORE THAN 50% of the walking path and is within 2 meters.
-- If the path IS blocked: say which way to move, e.g. "Chair ahead. Pass on your left."
-- If the path is clear: say "Path clear. Walk forward." or "Nothing ahead. Continue straight."
+- ALWAYS express distances as NUMBER OF STEPS, e.g. "Go 3 steps forward", "Take 2 steps to your right", "Chair 2 steps ahead on your left".
+- CRITICAL: If an object is on the LEFT or RIGHT side and covers LESS THAN 50% of the walking path, the user has enough room to walk. Say "Go X steps forward" or mention the object with its step distance but tell them to keep walking.
+- Only tell the user to step left/right when an object covers MORE THAN 50% of the walking path and is within 3 steps.
+- If the path IS blocked: say how many steps to move and which direction, e.g. "Chair 2 steps ahead. Take 2 steps to your left."
+- If the path is clear: say "Go 3 steps forward." or "Path clear, go 4 steps forward."
 - Maximum 20 words. No "you may" or "I suggest" — give a direct command.
-- Do not mention percentages, the map, the screen, or anything visual. Only verbal directions.
+- Do not mention percentages, meters, the map, the screen, or anything visual. Only steps and verbal directions.
 """
             try:
                 # Convert PIL Image to base64 for the new google-genai API
@@ -430,7 +458,7 @@ RULES:
         relevant = [d for d in classified if d["distance"] < 5.0]
 
         if not relevant:
-            result = "Path clear. Walk forward."
+            result = "Path clear. Go 3 steps forward."
             if navigation_context:
                 result += f" {navigation_context}"
             return result
@@ -439,11 +467,12 @@ RULES:
         for d in relevant:
             label    = d.get("label", "object")
             dist     = d.get("distance", 0)
+            steps    = self.meters_to_steps(dist)
             pos      = d.get("position", "unknown")
             cov      = d.get("corridor_coverage", 0)
             blocking = d.get("is_blocking_path", False)
             scene_desc.append(
-                f"- {label}: {pos}, {dist:.1f}m, "
+                f"- {label}: {pos}, {steps} step{'s' if steps != 1 else ''} away, "
                 f"covers {cov*100:.0f}% of path, "
                 f"{'BLOCKING' if blocking else 'not blocking'}"
             )
@@ -452,8 +481,10 @@ RULES:
         prompt_text = (
             f"You are speaking to a blind person. Goal: {navigation_context}\n"
             f"Scene:\n{scene_text}\n\n"
-            f"IMPORTANT: Only tell the user to step aside when an object covers >50% of the path AND is within 2m. "
-            f"If the object is on the side or covers little of the path, say 'Path clear, walk forward' "
+            f"IMPORTANT: Express ALL distances as number of steps (1 step ≈ 0.75m). "
+            f"Say things like 'Go 3 steps forward' or 'Take 2 steps to your right'. "
+            f"Only tell the user to step aside when an object covers >50% of the path AND is within 3 steps. "
+            f"If the object is on the side or covers little of the path, say 'Go X steps forward' "
             f"or mention the object but tell them to keep walking. Max 15 words."
         )
 
