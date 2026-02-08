@@ -56,7 +56,7 @@ export default function LandingPage() {
         <div className="navbar-inner">
           <Link href="/" className="logo">
             <div className="logo-icon">
-              <i className="fas fa-eye" />
+              <img src="/logo.jpg" alt="DWS logo" />
             </div>
             <span className="logo-text">DWS</span>
           </Link>
@@ -513,7 +513,7 @@ export default function LandingPage() {
             <div className="footer-brand">
               <div className="footer-logo">
                 <div className="logo-icon" style={{ width: 32, height: 32 }}>
-                  <i className="fas fa-eye" style={{ fontSize: "0.875rem" }} />
+                  <img src="/logo.jpg" alt="DWS logo" />
                 </div>
                 <span>DWS</span>
               </div>

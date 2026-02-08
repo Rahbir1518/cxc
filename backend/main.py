@@ -32,6 +32,7 @@ from services.tts import generate_voice_and_track_cost
 from services.reasoning import ObstacleClassifier, get_classifier
 from services.pathfinding import get_pathfinder
 from services.map_analyzer import get_map_analyzer
+from services.braille import get_braille_reader
 
 load_dotenv()
 
@@ -104,6 +105,9 @@ async def lifespan(app: FastAPI):
             print("   Navigation will be limited.")
     else:
         print(f"⚠️  Floor plan not found at {svg_path}")
+    
+    print("\n📦 Loading braille detection service...")
+    braille_reader = get_braille_reader()
     
     print("\n✅ Server ready!")
     print("="*50)
@@ -295,8 +299,8 @@ async def navigate(request: NavigateRequest):
         "path": path,
         "instruction": (
             f"Heading from room {start_room} to room {destination}. "
-            f"I will tell you when to turn and when to watch for obstacles. "
-            f"Start walking forward and tap Announce anytime to hear what is in front of you."
+            f"I will guide you every 3 seconds with step-by-step directions. "
+            f"Start walking forward."
         ),
     }
 
@@ -372,11 +376,48 @@ async def analyze_and_announce(
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_image = Image.fromarray(rgb_frame)
     
-    announcement = await classifier.reason_with_gemini(
+    # ── Run scene reasoning AND braille detection IN PARALLEL ──
+    # This adds zero extra latency — both calls execute concurrently.
+    # return_exceptions=True ensures braille errors NEVER break the normal announcement.
+    braille_reader = get_braille_reader()
+
+    # Pass navigation destination to braille reader for context-aware detection
+    if navigation_context:
+        import re
+        dest_match = re.search(r'room\s*(\w+)', navigation_context, re.IGNORECASE)
+        braille_reader.set_navigation_context(dest_match.group(1) if dest_match else None)
+    
+    announcement_task = classifier.reason_with_gemini(
         detection_dicts, 
         image_data=pil_image,
         navigation_context=navigation_context
     )
+    braille_task = braille_reader.detect_and_read(pil_image)
+    
+    results = await asyncio.gather(
+        announcement_task, braille_task,
+        return_exceptions=True,
+    )
+    
+    # Safely unpack — if either task raised, treat it as None/fallback
+    announcement = results[0]
+    braille_text = results[1]
+    
+    if isinstance(announcement, BaseException):
+        print(f"⚠️ Scene reasoning failed: {announcement}")
+        announcement = classifier.generate_navigation_instruction(detection_dicts)
+    
+    if isinstance(braille_text, BaseException):
+        print(f"⚠️ Braille detection failed: {braille_text}")
+        braille_text = None
+    
+    # ── If braille was found, append the reading to the announcement ──
+    if braille_text:
+        announcement = (
+            f"{announcement} "
+            f"I also detected braille text that reads: {braille_text}."
+        )
+        print(f"⠿ Braille detected: {braille_text}")
     
     # Draw boxes
     annotated = detector.draw_detections(frame, detections)
@@ -391,6 +432,7 @@ async def analyze_and_announce(
         "objects": objects_serializable,
         "frame_base64": frame_base64,
         "announcement": announcement,
+        "braille_text": braille_text,  # Separate field for UI display
     })
 
 

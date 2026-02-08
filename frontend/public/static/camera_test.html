@@ -435,7 +435,7 @@
             </div>
         </div>
 
-        <p class="voice-prompt" style="margin-bottom:0;">Camera — you'll hear what's in the way when you tap <strong>What's Ahead</strong>.</p>
+        <p class="voice-prompt" style="margin-bottom:0;">Camera active — tap <strong>Navigate</strong> for step-by-step guidance every 3 seconds.</p>
         <div id="videoContainer" class="video-container">
             <video id="videoElement" autoplay playsinline></video>
             <img id="processedFrame" alt="Camera with object boxes when connected">
@@ -448,13 +448,18 @@
         <div class="controls">
             <button id="startBtn" disabled>📷 Start</button>
             <button id="stopBtn" disabled>⏹ Stop</button>
-            <button id="announceBtn" disabled>🔊 What's Ahead</button>
+            <button id="announceBtn" disabled style="display:none;">🔊 What's Ahead</button>
             <button id="voiceNavBtn" disabled>🎤 Navigate</button>
         </div>
 
         <div id="manualEntry" class="manual-row">
             <input type="text" id="manualDest" placeholder="Room (e.g. 0010)">
             <button id="goBtn" style="padding: 0.6rem 1rem; background: var(--gradient-smoke); color: var(--color-bg-primary); border-radius: var(--radius-md);">Go</button>
+        </div>
+
+        <div class="info-panel" id="braillePanel" style="display:none; border-color: rgba(139,92,246,0.3);">
+            <h2 style="color:#a78bfa;">⠿ Braille Detected</h2>
+            <div id="brailleText" style="font-size:1rem; color:#e9d5ff; font-weight:500;"></div>
         </div>
 
         <div class="info-panel">
@@ -482,6 +487,8 @@
         const manualEntry = document.getElementById('manualEntry');
         const videoContainer = document.getElementById('videoContainer');
         const announceBtn = document.getElementById('announceBtn');
+        const braillePanel = document.getElementById('braillePanel');
+        const brailleTextEl = document.getElementById('brailleText');
         const mapLegend = document.getElementById('mapLegend');
         const navProgress = document.getElementById('navProgress');
         const progressFill = document.getElementById('progressFill');
@@ -901,7 +908,7 @@
                 stopBtn.disabled = false;
                 announceBtn.disabled = false;
                 videoContainer.classList.add('show-video');
-                voicePrompt.textContent = 'Tap "Navigate" and say: "Take me to room 0010" (or type below). Tap "What\'s Ahead" to hear what is in front of you.';
+                voicePrompt.textContent = 'Tap "Navigate" and say: "Take me to room 0010" (or type below). I\'ll guide you every 3 seconds with step-by-step directions.';
                 connectWebSocket();
             } catch (err) {
                 statusEl.textContent = `Camera: ${err.message}`;
@@ -1042,13 +1049,22 @@
                 const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
                 const form = new FormData();
                 form.append('file', blob, 'scene.jpg');
-                if (isNavigating && navDestination) form.append('navigation_context', 'User is heading to room ' + navDestination + '. Give verbal directions: say how many steps left or right if something is in the way.');
+                if (isNavigating && navDestination) form.append('navigation_context', 'User is heading to room ' + navDestination + '. Give step-based verbal directions using number of steps (e.g. go 3 steps forward, take 2 steps to your right).');
 
                 const res = await fetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
                 if (!res.ok) throw new Error('Server ' + res.status);
 
                 const data = await res.json();
                 const announcement = (data.announcement || "I couldn't analyze the scene.").trim();
+
+                // Show braille text if detected
+                if (data.braille_text) {
+                    braillePanel.style.display = 'block';
+                    brailleTextEl.textContent = data.braille_text;
+                } else {
+                    braillePanel.style.display = 'none';
+                    brailleTextEl.textContent = '';
+                }
 
                 if (data.frame_base64) {
                     processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
@@ -1065,7 +1081,7 @@
             announceBtn.disabled = false;
             if (isProcessing) statusEl.textContent = isNavigating
                 ? '🧭 Navigating to room ' + navDestination
-                : 'Camera on — tap What\'s Ahead for directions';
+                : 'Camera on — tap Navigate for step-by-step guidance';
         });
 
         // ─── DETECTIONS LIST ───────────────────────────────────────────
@@ -1076,9 +1092,11 @@
                 const d = obj.distance;
                 let cls = 'distance-far', text = '—';
                 if (d != null) {
-                    if (d < 1) { cls = 'distance-close'; text = d.toFixed(1) + 'm ⚠'; }
-                    else if (d < 2) { cls = 'distance-medium'; text = d.toFixed(1) + 'm'; }
-                    else text = d.toFixed(1) + 'm';
+                    const steps = Math.max(1, Math.round(d / 0.75));
+                    const stepLabel = steps === 1 ? 'step' : 'steps';
+                    if (d < 1) { cls = 'distance-close'; text = steps + ' ' + stepLabel + ' ⚠'; }
+                    else if (d < 2) { cls = 'distance-medium'; text = steps + ' ' + stepLabel; }
+                    else text = steps + ' ' + stepLabel;
                 }
                 return `<div class="detection-item"><span>${obj.label}</span><span class="${cls}">${text}</span></div>`;
             }).join('');
@@ -1171,7 +1189,7 @@
             voiceNavBtn.classList.add('active-nav');
             statusEl.textContent = '🧭 Navigating to room ' + navDestination;
 
-            speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will tell you when to turn and when to watch for obstacles. Tap What's Ahead to hear what is in front of you.`);
+            speakWithElevenLabs(data.instruction || `Heading to room ${navDestination}. I will guide you every 3 seconds with step-by-step directions.`);
 
             setTimeout(() => {
                 startPositionTracking();
@@ -1194,15 +1212,18 @@
             statusEl.textContent = 'Navigation stopped';
         }
 
-        // ─── DYNAMIC GUIDANCE (with overlap protection) ────────────────
+        // ─── DYNAMIC GUIDANCE (every 3s with overlap protection) ────────
+        let guidanceInFlight = false;
+
         function startDynamicGuidance() {
             if (guidanceInterval) clearInterval(guidanceInterval);
 
-            const navContext = `User is heading to room ${navDestination}. Give one short instruction.`;
+            const navContext = `User is heading to room ${navDestination}. Give step-based verbal directions using number of steps (e.g. "go 3 steps forward", "take 2 steps to your right").`;
 
             guidanceInterval = setInterval(async () => {
-                if (!isNavigating || !isProcessing || !videoEl.videoWidth || isSpeakingEL) return;
+                if (!isNavigating || !isProcessing || !videoEl.videoWidth || isSpeakingEL || guidanceInFlight) return;
 
+                guidanceInFlight = true;
                 try {
                     const canvas = document.createElement('canvas');
                     const scale = Math.min(1, 640 / videoEl.videoWidth);
@@ -1217,12 +1238,20 @@
                     const res = await fetch(`${serverUrl}/analyze-and-announce`, { method: 'POST', body: form });
                     const data = await res.json();
                     const announcement = data.announcement;
+
+                    // Update braille indicator during navigation too
+                    if (data.braille_text) {
+                        braillePanel.style.display = 'block';
+                        brailleTextEl.textContent = data.braille_text;
+                    }
+
                     if (announcement && !isSpeakingEL) {
                         statusEl.textContent = '🗣️ ' + announcement.slice(0, 50) + '…';
                         await speakWithElevenLabs(announcement);
                     }
                 } catch (e) { console.warn('Guidance:', e); }
-            }, 10000);
+                guidanceInFlight = false;
+            }, 3000);
         }
 
         // ─── INIT ──────────────────────────────────────────────────────
