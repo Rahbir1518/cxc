@@ -443,6 +443,99 @@ manager = ConnectionManager()
 viewer_manager = ViewerManager()
 
 
+# ── Meta Glasses connection managers ──
+class GlassesConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"🕶️  Glasses client connected. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        print(f"🕶️  Glasses client disconnected. Total: {len(self.active_connections)}")
+
+
+class GlassesViewerManager:
+    def __init__(self):
+        self.viewers: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.viewers.append(websocket)
+        print(f"👁️  Glasses viewer connected. Total: {len(self.viewers)}")
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.viewers:
+            self.viewers.remove(websocket)
+        print(f"👁️  Glasses viewer disconnected. Total: {len(self.viewers)}")
+
+    async def broadcast(self, data: dict):
+        if not self.viewers:
+            return
+        disconnected = []
+        for viewer in self.viewers:
+            try:
+                await viewer.send_json(data)
+            except Exception:
+                disconnected.append(viewer)
+        for v in disconnected:
+            self.disconnect(v)
+
+
+glasses_manager = GlassesConnectionManager()
+glasses_viewer_manager = GlassesViewerManager()
+
+
+@app.post("/read-text")
+async def read_text(
+    file: UploadFile = File(...),
+):
+    """
+    OCR + Text Reading endpoint for visually impaired users.
+    Uses Gemini Vision to read all visible text in the image,
+    then returns the text and optionally generates TTS audio.
+
+    - **file**: Image file (JPEG, PNG) — typically a frame from Meta Glasses
+    Returns: { text_found, announcement }
+    """
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
+    # Use Gemini Vision to read text
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb_frame)
+
+    classifier = get_classifier()
+    try:
+        text_result = await classifier.read_text_in_image(pil_image)
+    except AttributeError:
+        # Fallback: use generic Gemini reasoning with a text-reading prompt
+        text_result = await classifier.reason_with_gemini(
+            [],
+            image_data=pil_image,
+            navigation_context=(
+                "IMPORTANT: You are helping a visually impaired person READ TEXT. "
+                "Carefully read ALL visible text in this image — signs, labels, documents, "
+                "screens, books, menus, nameplates, room numbers, etc. "
+                "Read the text out loud exactly as written, then briefly describe where "
+                "each piece of text is located. If no text is visible, say so clearly."
+            ),
+        )
+
+    return JSONResponse({
+        "text_found": text_result,
+        "announcement": text_result,
+    })
+
+
 @app.websocket("/ws/video")
 async def websocket_video(websocket: WebSocket):
     """
@@ -599,20 +692,191 @@ async def websocket_viewer(websocket: WebSocket):
         viewer_manager.disconnect(websocket)
 
 
+@app.websocket("/ws/glasses")
+async def websocket_glasses(websocket: WebSocket):
+    """
+    WebSocket endpoint for Meta Glasses real-time video processing.
+
+    Identical pipeline to /ws/video but:
+    - Uses higher resolution frames (glasses → phone relay → server)
+    - Includes OCR / text-reading capability on every Nth frame
+    - Broadcasts to /ws/glasses-viewer (separate from phone viewers)
+
+    Client sends: base64-encoded JPEG frames
+    Server sends: JSON with detections + annotated frame + instruction + text_found
+    """
+    await glasses_manager.connect(websocket)
+
+    DEPTH_COOLDOWN_S = 1.5
+    INSTRUCTION_EVERY_N = 8
+    TEXT_READ_EVERY_N = 30  # OCR every ~30 frames (roughly every 3-5 seconds)
+
+    frame_count = 0
+    cached_depth_map = None
+    cached_instruction = ""
+    cached_classified = []
+    cached_label_set: set = set()
+    cached_text = ""
+    last_depth_time = 0.0
+
+    try:
+        while True:
+            # 1. Drain queue — keep only the freshest frame
+            data = await websocket.receive_text()
+            while True:
+                try:
+                    newer = await asyncio.wait_for(
+                        websocket.receive_text(), timeout=0.001
+                    )
+                    data = newer
+                except asyncio.TimeoutError:
+                    break
+
+            # 2. Decode
+            try:
+                image_bytes = base64.b64decode(data)
+                nparr = np.frombuffer(image_bytes, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            except Exception as e:
+                await websocket.send_json({"error": f"Invalid frame: {e}"})
+                continue
+
+            if frame is None:
+                await websocket.send_json({"error": "Could not decode frame"})
+                continue
+
+            frame_count += 1
+            now = time.monotonic()
+
+            # 3. Detection — every frame
+            detections = (
+                await asyncio.to_thread(detector.detect, frame)
+                if detector
+                else []
+            )
+
+            # 4. Depth — time-throttled
+            if (
+                depth_estimator is not None
+                and detections
+                and (now - last_depth_time) >= DEPTH_COOLDOWN_S
+            ):
+                cached_depth_map, _ = await asyncio.to_thread(
+                    depth_estimator.estimate, frame
+                )
+                last_depth_time = now
+
+            if cached_depth_map is not None and detections:
+                for det in detections:
+                    det.distance = depth_estimator.get_distance_for_bbox(
+                        cached_depth_map, det.bbox
+                    )
+
+            # 5. Classify
+            detection_dicts = [det.to_dict() for det in detections]
+            classifier = get_classifier()
+            classified = classifier.classify_all(detection_dicts)
+            cached_classified = classified
+
+            # 6. Annotate + encode
+            annotated = (
+                detector.draw_detections(frame, detections) if detections else frame
+            )
+            _, buffer = cv2.imencode(
+                ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 50]
+            )
+            frame_b64 = base64.b64encode(buffer).decode("utf-8")
+
+            # 7. Instruction — cache until labels change
+            current_labels = frozenset(d.get("label", "") for d in classified)
+            if (
+                current_labels != cached_label_set
+                or frame_count % INSTRUCTION_EVERY_N == 0
+                or not cached_instruction
+            ):
+                cached_instruction = classifier.generate_navigation_instruction(
+                    detection_dicts
+                )
+                cached_label_set = current_labels
+
+            # 8. OCR / Text reading — periodic (non-blocking, best effort)
+            if frame_count % TEXT_READ_EVERY_N == 0:
+                try:
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_image = Image.fromarray(rgb_frame)
+                    try:
+                        cached_text = await classifier.read_text_in_image(pil_image)
+                    except AttributeError:
+                        cached_text = await classifier.reason_with_gemini(
+                            [],
+                            image_data=pil_image,
+                            navigation_context=(
+                                "Read ALL visible text in this image briefly. "
+                                "Signs, labels, room numbers, screens, etc. "
+                                "If no text, reply 'No text visible'."
+                            ),
+                        )
+                except Exception as e:
+                    print(f"Glasses OCR error: {e}")
+
+            # 9. Send response
+            response_data = {
+                "objects": _make_json_serializable(cached_classified),
+                "frame_base64": frame_b64,
+                "instruction": cached_instruction,
+                "text_found": cached_text,
+                "source": "glasses",
+            }
+            await websocket.send_json(response_data)
+
+            # 10. Broadcast to glasses dashboard viewers
+            await glasses_viewer_manager.broadcast(response_data)
+
+    except WebSocketDisconnect:
+        glasses_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"Glasses WebSocket error: {e}")
+        glasses_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/glasses-viewer")
+async def websocket_glasses_viewer(websocket: WebSocket):
+    """
+    WebSocket endpoint for dashboard viewers of the Meta Glasses feed.
+    Receives broadcast from /ws/glasses in real-time.
+    """
+    await glasses_viewer_manager.connect(websocket)
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+    except WebSocketDisconnect:
+        glasses_viewer_manager.disconnect(websocket)
+    except Exception as e:
+        print(f"Glasses viewer WebSocket error: {e}")
+        glasses_viewer_manager.disconnect(websocket)
+
+
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Get port from env or default to 8000
     port = int(os.getenv("PORT", 8000))
-    
+
     print(f"\n🌐 Starting server on http://0.0.0.0:{port}")
     print(f"📱 For phone access, use your computer's local IP address")
+    print(f"🕶️  For Meta Glasses, open /static/glasses_feed.html on your iPhone")
     print(f"   Example: http://192.168.x.x:{port}")
-    
+
     uvicorn.run(
         app,
-        host="0.0.0.0",  # Allow external connections
+        host="0.0.0.0",
         port=port,
-        reload=False,  # Disable reload for production
-        timeout_keep_alive=30,  # Close idle keep-alive connections after 30s
+        reload=False,
+        timeout_keep_alive=30,
     )

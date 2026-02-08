@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>DWS — Meta Glasses Feed</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --smoke-50: #f2f4f3;
+            --color-bg-primary: #0a0e0c;
+            --color-bg-secondary: #101614;
+            --color-bg-card: #121a17;
+            --color-bg-tertiary: #1a2420;
+            --color-bg-hover: #1e2a26;
+            --color-text-primary: #f2f4f3;
+            --color-text-secondary: #bfc8c3;
+            --color-text-muted: #87948d;
+            --color-border: rgba(191, 200, 195, 0.1);
+            --color-border-hover: rgba(191, 200, 195, 0.3);
+            --color-primary-400: #c8d5cf;
+            --gradient-smoke: linear-gradient(135deg, #d5dbd8 0%, #bfc8c3 100%);
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --radius-sm: 0.5rem;
+            --radius-md: 0.75rem;
+            --radius-lg: 1rem;
+            --transition-fast: 150ms ease;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--font-sans);
+            background: var(--color-bg-primary);
+            color: var(--color-text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+        }
+        header {
+            background: var(--color-bg-secondary);
+            padding: 0.75rem 1rem;
+            text-align: center;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .header-brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+        .glasses-icon {
+            font-size: 1.4rem;
+        }
+        h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #fff 0%, var(--color-primary-400) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        #status {
+            font-size: 0.8rem;
+            color: var(--color-primary-400);
+            font-family: var(--font-mono);
+            font-weight: 500;
+        }
+        .container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 0.75rem;
+            gap: 0.75rem;
+        }
+        .server-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .server-row input {
+            flex: 1;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            background: var(--color-bg-card);
+            color: var(--color-text-primary);
+            font-size: 0.9rem;
+            font-family: var(--font-mono);
+        }
+        .server-row input:focus { outline: none; border-color: var(--color-border-hover); }
+
+        .mode-selector {
+            display: flex;
+            gap: 0.5rem;
+            padding: 4px;
+            background: var(--color-bg-card);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+        }
+        .mode-btn {
+            flex: 1;
+            padding: 0.6rem 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            border: none;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            background: transparent;
+            color: var(--color-text-muted);
+            transition: all var(--transition-fast);
+        }
+        .mode-btn.active {
+            background: rgba(191,200,195,0.15);
+            color: var(--color-primary-400);
+        }
+        .mode-btn:hover:not(.active) {
+            color: var(--color-text-secondary);
+        }
+
+        .help-text {
+            padding: 0.6rem 0.75rem;
+            background: var(--color-bg-card);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-md);
+            font-size: 0.78rem;
+            color: var(--color-text-muted);
+            line-height: 1.5;
+        }
+        .help-text strong { color: var(--color-primary-400); }
+
+        .video-container {
+            position: relative;
+            background: var(--color-bg-card);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            flex: 1;
+            min-height: 220px;
+            border: 1px solid var(--color-border);
+        }
+        #videoElement, #processedFrame {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+        }
+        #videoElement { z-index: 0; }
+        #processedFrame { z-index: 1; background: #000; }
+        .video-container.show-video #processedFrame { opacity: 0; pointer-events: none; }
+
+        .controls {
+            display: flex;
+            gap: 0.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 0.7rem 1.1rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            font-family: var(--font-sans);
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        button:active:not(:disabled) { transform: scale(0.97); }
+        #connectBtn {
+            background: var(--gradient-smoke);
+            color: var(--color-bg-primary);
+        }
+        #startBtn {
+            background: var(--gradient-smoke);
+            color: var(--color-bg-primary);
+        }
+        #stopBtn {
+            background: rgba(252,165,165,0.15);
+            color: #fca5a5;
+            border: 1px solid rgba(252,165,165,0.2);
+        }
+        #readTextBtn {
+            background: rgba(147,197,253,0.15);
+            color: #93c5fd;
+            border: 1px solid rgba(147,197,253,0.2);
+        }
+        #readTextBtn:not(:disabled):hover {
+            background: rgba(147,197,253,0.25);
+        }
+        #readTextBtn.reading {
+            animation: pulse-read 1s ease-in-out infinite;
+        }
+        @keyframes pulse-read {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(147,197,253,0.2); }
+            50% { box-shadow: 0 0 20px 4px rgba(147,197,253,0.4); }
+        }
+        #announceBtn {
+            background: rgba(191,200,195,0.1);
+            color: var(--color-primary-400);
+            border: 1px solid var(--color-border);
+        }
+        #announceBtn.speaking {
+            animation: pulse-speak 1s ease-in-out infinite;
+        }
+        @keyframes pulse-speak {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(191,200,195,0.2); }
+            50% { box-shadow: 0 0 20px 4px rgba(191,200,195,0.4); }
+        }
+
+        .info-panel {
+            background: var(--color-bg-card);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 0.75rem;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .info-panel h2 {
+            font-size: 0.8rem;
+            margin-bottom: 0.4rem;
+            color: var(--color-primary-400);
+            font-weight: 600;
+        }
+        #detectionList, #textReadout {
+            font-size: 0.8rem;
+            line-height: 1.5;
+        }
+        .detection-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .detection-item:last-child { border-bottom: none; }
+        .distance-close { color: #fca5a5; }
+        .distance-medium { color: #fde047; }
+        .distance-far { color: #86efac; }
+        .text-readout-content {
+            color: var(--color-text-secondary);
+            font-style: italic;
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--color-bg-primary); }
+        ::-webkit-scrollbar-thumb { background: var(--color-bg-tertiary); border-radius: 999px; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-brand">
+            <span class="glasses-icon">🕶️</span>
+            <h1>DWS — Meta Glasses</h1>
+        </div>
+        <div id="status">Enter server address and connect</div>
+    </header>
+
+    <div class="container">
+        <div class="server-row">
+            <input type="text" id="serverUrl" placeholder="Server (e.g. 192.168.1.100:8000)" value="">
+            <button id="connectBtn">Connect</button>
+        </div>
+
+        <!-- Capture Mode Selector -->
+        <div class="mode-selector">
+            <button class="mode-btn active" data-mode="camera" id="modeCameraBtn">📷 Camera</button>
+            <button class="mode-btn" data-mode="screen" id="modeScreenBtn">📱 Screen Share</button>
+        </div>
+
+        <div id="helpText" class="help-text">
+            <strong>Camera mode:</strong> Uses your iPhone's rear camera directly.
+            Point your phone at the same direction as your Meta Glasses.
+            <br><br>
+            <strong>Screen Share mode:</strong> If your Meta View app is showing the glasses' live view,
+            use Screen Share to capture exactly what the glasses see.
+        </div>
+
+        <div id="videoContainer" class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <img id="processedFrame" alt="Processed feed from Meta Glasses">
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" disabled>🕶️ Start</button>
+            <button id="stopBtn" disabled>⏹ Stop</button>
+            <button id="readTextBtn" disabled>📖 Read Text</button>
+            <button id="announceBtn" disabled>🔊 What's Ahead</button>
+        </div>
+
+        <div class="info-panel">
+            <h2>📖 Text Reading</h2>
+            <div id="textReadout"><em style="color:var(--color-text-muted)">Tap "Read Text" to read visible text aloud.</em></div>
+        </div>
+
+        <div class="info-panel">
+            <h2>Detected Objects</h2>
+            <div id="detectionList">Start feed to see detections.</div>
+        </div>
+    </div>
+
+    <script>
+        // ─── DOM REFS ──────────────────────────────────────
+        const serverUrlInput = document.getElementById('serverUrl');
+        const connectBtn = document.getElementById('connectBtn');
+        const statusEl = document.getElementById('status');
+        const videoEl = document.getElementById('videoElement');
+        const processedFrame = document.getElementById('processedFrame');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const readTextBtn = document.getElementById('readTextBtn');
+        const announceBtn = document.getElementById('announceBtn');
+        const detectionList = document.getElementById('detectionList');
+        const textReadout = document.getElementById('textReadout');
+        const videoContainer = document.getElementById('videoContainer');
+        const modeCameraBtn = document.getElementById('modeCameraBtn');
+        const modeScreenBtn = document.getElementById('modeScreenBtn');
+        const helpText = document.getElementById('helpText');
+
+        // ─── STATE ─────────────────────────────────────────
+        let serverUrl = '';
+        let ws = null;
+        let stream = null;
+        let isProcessing = false;
+        let captureMode = 'camera'; // 'camera' or 'screen'
+        let lastDetections = [];
+        let lastTextFound = '';
+
+        // ─── AUDIO MANAGEMENT ──────────────────────────────
+        let currentAudio = null;
+        let isSpeakingEL = false;
+
+        function stopAllAudio() {
+            if (currentAudio) {
+                try { currentAudio.pause(); currentAudio.currentTime = 0;
+                    if (currentAudio._blobUrl) URL.revokeObjectURL(currentAudio._blobUrl);
+                } catch(e) {}
+                currentAudio = null;
+            }
+            speechSynthesis.cancel();
+            isSpeakingEL = false;
+            announceBtn.classList.remove('speaking');
+            readTextBtn.classList.remove('reading');
+        }
+
+        function speak(text) {
+            if (!text) return;
+            stopAllAudio();
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 0.85; // Slightly slower for visually impaired
+            speechSynthesis.speak(u);
+        }
+
+        async function speakWithElevenLabs(text) {
+            if (!text) return;
+            stopAllAudio();
+            isSpeakingEL = true;
+            announceBtn.classList.add('speaking');
+            try {
+                const res = await fetch(serverUrl + '/announce', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+                if (!res.ok) throw new Error(res.status);
+                const blob = await res.blob();
+                if (!blob || blob.size === 0) throw new Error('No audio');
+                if (!isSpeakingEL) return;
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+                audio._blobUrl = url;
+                return new Promise((resolve) => {
+                    audio.onended = () => {
+                        URL.revokeObjectURL(url); currentAudio = null;
+                        isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        readTextBtn.classList.remove('reading');
+                        resolve();
+                    };
+                    audio.onerror = () => {
+                        URL.revokeObjectURL(url); currentAudio = null;
+                        isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        readTextBtn.classList.remove('reading');
+                        speak(text); resolve();
+                    };
+                    currentAudio = audio;
+                    audio.play().catch(() => {
+                        currentAudio = null; isSpeakingEL = false;
+                        announceBtn.classList.remove('speaking');
+                        readTextBtn.classList.remove('reading');
+                        speak(text); resolve();
+                    });
+                });
+            } catch (e) {
+                console.warn('ElevenLabs fallback to TTS:', e);
+                isSpeakingEL = false;
+                announceBtn.classList.remove('speaking');
+                readTextBtn.classList.remove('reading');
+                speak(text);
+            }
+        }
+
+        // ─── MODE SELECTOR ─────────────────────────────────
+        modeCameraBtn.addEventListener('click', () => {
+            captureMode = 'camera';
+            modeCameraBtn.classList.add('active');
+            modeScreenBtn.classList.remove('active');
+            helpText.innerHTML = '<strong>Camera mode:</strong> Uses your iPhone\'s rear camera directly. Point your phone at the same direction as your Meta Glasses.';
+        });
+        modeScreenBtn.addEventListener('click', () => {
+            captureMode = 'screen';
+            modeScreenBtn.classList.add('active');
+            modeCameraBtn.classList.remove('active');
+            helpText.innerHTML = '<strong>Screen Share mode:</strong> Opens your Meta View app, then use Screen Share to capture the glasses\' live view from the Meta View app.';
+        });
+
+        // ─── CONNECTION ────────────────────────────────────
+        connectBtn.addEventListener('click', () => {
+            let url = serverUrlInput.value.trim();
+            if (!url) { alert('Enter server address'); return; }
+            if (!url.startsWith('http')) url = 'http://' + url;
+            serverUrl = url;
+            fetch(`${serverUrl}/health`)
+                .then(res => res.json())
+                .then(() => {
+                    statusEl.textContent = '✓ Connected to server';
+                    statusEl.style.color = '#86efac';
+                    startBtn.disabled = false;
+                })
+                .catch(err => {
+                    statusEl.textContent = `✗ ${err.message}`;
+                    statusEl.style.color = '#fca5a5';
+                });
+        });
+
+        // ─── START / STOP ──────────────────────────────────
+        startBtn.addEventListener('click', async () => {
+            try {
+                if (captureMode === 'screen') {
+                    // Screen capture — captures the Meta View app display
+                    if (!navigator.mediaDevices?.getDisplayMedia) {
+                        alert('Screen sharing is not supported on this browser. Try Camera mode.');
+                        return;
+                    }
+                    stream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    });
+                } else {
+                    // Direct camera — use rear camera on iPhone
+                    if (!navigator.mediaDevices?.getUserMedia) {
+                        alert('Camera not available. Use HTTPS or localhost.');
+                        return;
+                    }
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+                        audio: false
+                    });
+                }
+                videoEl.srcObject = stream;
+                await videoEl.play();
+                statusEl.textContent = '🕶️ Glasses feed active — streaming to server';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                readTextBtn.disabled = false;
+                announceBtn.disabled = false;
+                videoContainer.classList.add('show-video');
+                connectWebSocket();
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+                statusEl.style.color = '#fca5a5';
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            stopAllAudio();
+            stopSendLoop();
+            isProcessing = false;
+            awaitingResponse = false;
+            if (ws) { ws.close(); ws = null; }
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            statusEl.textContent = 'Stopped';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            readTextBtn.disabled = true;
+            announceBtn.disabled = true;
+        });
+
+        // ─── WEBSOCKET (glasses-specific endpoint) ─────────
+        let awaitingResponse = false;
+        let sendTimestamp = 0;
+        let adaptiveInterval = 120;
+        let sendIntervalId = null;
+
+        const sendCanvas = document.createElement('canvas');
+        const sendCtx = sendCanvas.getContext('2d');
+        const SEND_WIDTH = 480; // Higher res for text reading
+
+        function connectWebSocket() {
+            const wsUrl = serverUrl.replace('http', 'ws') + '/ws/glasses';
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                isProcessing = true;
+                awaitingResponse = false;
+                startSendLoop();
+                statusEl.textContent = '🕶️ Live — tap Read Text to read signs/labels';
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const data = JSON.parse(ev.data);
+                    if (data.error) { awaitingResponse = false; return; }
+
+                    const rtt = Date.now() - sendTimestamp;
+                    adaptiveInterval = Math.max(100, Math.min(1000, Math.round(rtt * 1.6)));
+
+                    if (data.frame_base64) {
+                        processedFrame.src = 'data:image/jpeg;base64,' + data.frame_base64;
+                        videoContainer.classList.remove('show-video');
+                    }
+                    if (data.objects) {
+                        lastDetections = data.objects;
+                        updateDetectionsList(data.objects);
+                    }
+                    if (data.text_found && data.text_found !== lastTextFound) {
+                        lastTextFound = data.text_found;
+                        updateTextReadout(data.text_found);
+                    }
+                    awaitingResponse = false;
+                } catch (e) {
+                    console.error("WS parse error", e);
+                    awaitingResponse = false;
+                }
+            };
+            ws.onerror = () => {
+                statusEl.textContent = 'WebSocket error';
+                statusEl.style.color = '#fca5a5';
+                awaitingResponse = false;
+            };
+            ws.onclose = () => {
+                stopSendLoop();
+                if (isProcessing) setTimeout(connectWebSocket, 2000);
+            };
+        }
+
+        function startSendLoop() {
+            if (sendIntervalId) return;
+            sendIntervalId = setInterval(trySendFrame, 100);
+        }
+        function stopSendLoop() {
+            if (sendIntervalId) { clearInterval(sendIntervalId); sendIntervalId = null; }
+        }
+
+        function trySendFrame() {
+            if (awaitingResponse) return;
+            if (!videoEl.videoWidth || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+            const scale = SEND_WIDTH / videoEl.videoWidth;
+            const h = Math.round(videoEl.videoHeight * scale);
+            if (sendCanvas.width !== SEND_WIDTH || sendCanvas.height !== h) {
+                sendCanvas.width = SEND_WIDTH;
+                sendCanvas.height = h;
+            }
+            sendCtx.drawImage(videoEl, 0, 0, sendCanvas.width, sendCanvas.height);
+            sendCanvas.toBlob(blob => {
+                if (!blob || !ws || ws.readyState !== WebSocket.OPEN) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                    awaitingResponse = true;
+                    sendTimestamp = Date.now();
+                    ws.send(reader.result.split(',')[1]);
+                };
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.50); // Higher quality for text readability
+        }
+
+        // ─── READ TEXT (OCR) ───────────────────────────────
+        readTextBtn.addEventListener('click', async () => {
+            if (!videoEl.videoWidth || !serverUrl) return;
+            if (isSpeakingEL) { stopAllAudio(); statusEl.textContent = 'Stopped'; return; }
+
+            readTextBtn.disabled = true;
+            readTextBtn.classList.add('reading');
+            statusEl.textContent = '📖 Reading text...';
+            try {
+                // Capture high-res frame for OCR
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 1280 / videoEl.videoWidth);
+                canvas.width = videoEl.videoWidth * scale;
+                canvas.height = videoEl.videoHeight * scale;
+                canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+
+                const form = new FormData();
+                form.append('file', blob, 'glasses_frame.jpg');
+
+                const res = await fetch(serverUrl + '/read-text', { method: 'POST', body: form });
+                if (!res.ok) throw new Error('Server ' + res.status);
+
+                const data = await res.json();
+                const text = (data.text_found || "I couldn't find any text in the image.").trim();
+                updateTextReadout(text);
+                statusEl.textContent = '🗣️ Reading aloud...';
+                await speakWithElevenLabs(text);
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = 'Error: ' + err.message;
+                speak("Something went wrong reading text.");
+            }
+            readTextBtn.disabled = false;
+            readTextBtn.classList.remove('reading');
+            if (isProcessing) statusEl.textContent = '🕶️ Live — tap Read Text for text reading';
+        });
+
+        // ─── ANNOUNCE (What's Ahead) ───────────────────────
+        announceBtn.addEventListener('click', async () => {
+            if (!videoEl.videoWidth || !serverUrl) return;
+            if (isSpeakingEL) { stopAllAudio(); statusEl.textContent = 'Stopped'; return; }
+
+            announceBtn.disabled = true;
+            statusEl.textContent = 'Analyzing scene…';
+            try {
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(1, 640 / videoEl.videoWidth);
+                canvas.width = videoEl.videoWidth * scale;
+                canvas.height = videoEl.videoHeight * scale;
+                canvas.getContext('2d').drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+                const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.6));
+                const form = new FormData();
+                form.append('file', blob, 'scene.jpg');
+
+                const res = await fetch(serverUrl + '/analyze-and-announce', { method: 'POST', body: form });
+                if (!res.ok) throw new Error('Server ' + res.status);
+                const data = await res.json();
+                const announcement = (data.announcement || "I couldn't analyze the scene.").trim();
+                statusEl.textContent = '🗣️ Speaking…';
+                await speakWithElevenLabs(announcement);
+            } catch (err) {
+                console.error(err);
+                statusEl.textContent = 'Error: ' + err.message;
+                speak("Something went wrong. Check connection.");
+            }
+            announceBtn.disabled = false;
+            if (isProcessing) statusEl.textContent = '🕶️ Live feed active';
+        });
+
+        // ─── DETECTIONS LIST ───────────────────────────────
+        function updateDetectionsList(objects) {
+            if (!objects?.length) { detectionList.innerHTML = '<em style="color:var(--color-text-muted)">Path clear</em>'; return; }
+            objects.sort((a, b) => (a.distance ?? 999) - (b.distance ?? 999));
+            detectionList.innerHTML = objects.map(obj => {
+                const d = obj.distance;
+                let cls = 'distance-far', text = '—';
+                if (d != null) {
+                    if (d < 1) { cls = 'distance-close'; text = d.toFixed(1) + 'm ⚠'; }
+                    else if (d < 2) { cls = 'distance-medium'; text = d.toFixed(1) + 'm'; }
+                    else text = d.toFixed(1) + 'm';
+                }
+                return `<div class="detection-item"><span>${obj.label}</span><span class="${cls}">${text}</span></div>`;
+            }).join('');
+        }
+
+        function updateTextReadout(text) {
+            if (!text || text.includes('No text visible') || text.includes("don't see")) {
+                textReadout.innerHTML = '<em style="color:var(--color-text-muted)">No readable text detected in current view.</em>';
+            } else {
+                textReadout.innerHTML = `<div class="text-readout-content">"${text}"</div>`;
+            }
+        }
+
+        // ─── INIT ──────────────────────────────────────────
+        window.addEventListener('load', () => {
+            const host = window.location.hostname;
+            if (host !== 'localhost' && host !== '127.0.0.1') serverUrlInput.value = host + ':8000';
+            else serverUrlInput.value = 'localhost:8000';
+            if (window.location.port === '8000' || window.location.origin.includes('8000')) {
+                serverUrl = window.location.origin;
+            }
+        });
+    </script>
+</body>
+</html>
