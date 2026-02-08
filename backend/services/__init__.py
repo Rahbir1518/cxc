@@ -1,9 +1,14 @@
 """
 Services module initialization.
-Export detection and depth estimation services.
+Export braille detection, TTS, and other services.
 """
 
-from .detection import ObjectDetector, DetectedObject
-from .depth import DepthEstimator
+from .braille import detect_braille, detect_braille_opencv, detect_braille_gemini
+from .tts import generate_voice_and_track_cost
 
-__all__ = ["ObjectDetector", "DetectedObject", "DepthEstimator"]
+__all__ = [
+    "detect_braille",
+    "detect_braille_opencv",
+    "detect_braille_gemini",
+    "generate_voice_and_track_cost",
+]

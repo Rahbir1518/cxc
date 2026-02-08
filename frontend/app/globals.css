@@ -3,6 +3,20 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --accent: #6C5CE7;
+  --accent-light: #A29BFE;
+  --accent-dark: #5A4BD1;
+  --success: #00B894;
+  --warning: #FDCB6E;
+  --danger: #E17055;
+  --surface: #F8F9FA;
+  --surface-dark: #1A1A2E;
+  --border: #E2E8F0;
+  --text-muted: #94A3B8;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 40px rgba(0, 0, 0, 0.12);
 }
 
 @theme inline {
@@ -16,11 +30,547 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+    --surface: #1A1A2E;
+    --border: #2D2D44;
+    --text-muted: #64748B;
   }
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Navigation Page
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.navigation-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+}
+
+.navigation-page__header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  backdrop-filter: blur(20px);
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid var(--border);
+}
+
+@media (prefers-color-scheme: dark) {
+  .navigation-page__header {
+    background: rgba(10, 10, 10, 0.85);
+  }
+}
+
+.navigation-page__header-inner {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.navigation-page__logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+}
+
+.navigation-page__title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+}
+
+.navigation-page__back-link {
+  font-size: 14px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity 0.15s;
+}
+
+.navigation-page__back-link:hover {
+  opacity: 0.7;
+}
+
+.navigation-page__content {
+  flex: 1;
+  max-width: 640px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 20px;
+}
+
+.navigation-page__footer {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Braille Scanner Component
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.braille-scanner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Start Screen ──────────────────────────────────────────────────────────── */
+
+.braille-scanner__start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 24px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  text-align: center;
+  min-height: 360px;
+}
+
+.braille-scanner__icon {
+  color: var(--accent);
+  animation: braille-float 3s ease-in-out infinite;
+}
+
+@keyframes braille-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.braille-scanner__title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.braille-scanner__subtitle {
+  color: var(--text-muted);
+  font-size: 15px;
+  margin: 0;
+  max-width: 280px;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+
+.braille-scanner__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.braille-scanner__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.braille-scanner__btn--primary {
+  background: var(--accent);
+  color: white;
+  padding: 14px 32px;
+  border-radius: 50px;
+  font-size: 16px;
+  box-shadow: 0 4px 20px rgba(108, 92, 231, 0.35);
+}
+
+.braille-scanner__btn--primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 24px rgba(108, 92, 231, 0.45);
+}
+
+.braille-scanner__btn--icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  backdrop-filter: blur(8px);
+}
+
+.braille-scanner__btn--icon:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.braille-scanner__btn--active {
+  background: var(--accent) !important;
+  color: white !important;
+  position: relative;
+}
+
+.braille-scanner__btn--scan {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 4px 24px rgba(108, 92, 231, 0.5);
+  position: relative;
+}
+
+.braille-scanner__btn--scan::before {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.braille-scanner__btn--scan:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 6px 30px rgba(108, 92, 231, 0.6);
+}
+
+.braille-scanner__btn--scan:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.braille-scanner__scan-ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.braille-scanner__btn--small {
+  background: var(--accent);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 50px;
+  font-size: 13px;
+}
+
+.braille-scanner__btn--small:hover {
+  background: var(--accent-dark);
+}
+
+.braille-scanner__btn--tiny {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  flex-shrink: 0;
+}
+
+.braille-scanner__btn--tiny:hover {
+  background: var(--accent-dark);
+}
+
+.braille-scanner__auto-badge {
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  font-weight: 800;
+  background: var(--success);
+  color: white;
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Camera View ───────────────────────────────────────────────────────────── */
+
+.braille-scanner__camera-container {
+  position: relative;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #000;
+  box-shadow: var(--shadow-lg);
+}
+
+.braille-scanner__video-wrapper {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+}
+
+.braille-scanner__video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.braille-scanner__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.braille-scanner__crosshair {
+  width: 200px;
+  height: 120px;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  position: relative;
+  box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.2);
+}
+
+.braille-scanner__crosshair::before,
+.braille-scanner__crosshair::after {
+  content: "";
+  position: absolute;
+  background: var(--accent-light);
+}
+
+.braille-scanner__crosshair::before {
+  top: -2px;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+}
+
+.braille-scanner__crosshair::after {
+  bottom: -2px;
+  left: 20px;
+  right: 20px;
+  height: 2px;
+}
+
+.braille-scanner__overlay-text {
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  margin-top: 16px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.braille-scanner__status-pill {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  color: white;
+  padding: 8px 18px;
+  border-radius: 50px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 5;
+}
+
+.braille-scanner__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  animation: braille-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes braille-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+/* ── Controls Bar ──────────────────────────────────────────────────────────── */
+
+.braille-scanner__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 20px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.4));
+}
+
+.braille-scanner__close-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.5);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  transition: background 0.2s;
+}
+
+.braille-scanner__close-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* ── Error Banner ──────────────────────────────────────────────────────────── */
+
+.braille-scanner__error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: rgba(225, 112, 85, 0.1);
+  border: 1px solid rgba(225, 112, 85, 0.3);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── Result Card ───────────────────────────────────────────────────────────── */
+
+.braille-scanner__result {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  animation: braille-slide-up 0.3s ease-out;
+}
+
+@keyframes braille-slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.braille-scanner__result--empty {
+  background: transparent;
+  border-style: dashed;
+}
+
+.braille-scanner__result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.braille-scanner__result-label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.braille-scanner__confidence {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.braille-scanner__confidence--gemini-direct,
+.braille-scanner__confidence--gemini {
+  background: rgba(108, 92, 231, 0.15);
+  color: var(--accent);
+}
+
+.braille-scanner__confidence--opencv {
+  background: rgba(0, 184, 148, 0.15);
+  color: var(--success);
+}
+
+.braille-scanner__result-text {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 16px;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.braille-scanner__result-text--muted {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-bottom: 0;
+}
+
+.braille-scanner__result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Scan History ──────────────────────────────────────────────────────────── */
+
+.braille-scanner__history {
+  margin-top: 8px;
+}
+
+.braille-scanner__history-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.braille-scanner__history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.braille-scanner__history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+
+.braille-scanner__history-text {
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Hidden Utility ────────────────────────────────────────────────────────── */
+
+.hidden {
+  display: none;
 }
