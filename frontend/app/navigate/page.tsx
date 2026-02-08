@@ -6,11 +6,8 @@ import {
   Mic,
   MicOff,
   Video,
-  VideoOff,
-  Volume2,
   Navigation,
   Square,
-  Eye,
   MapPin,
 } from "lucide-react";
 import { useSpeaker } from "@/components/navigation/VoiceSpeaker";
@@ -233,22 +230,22 @@ export default function NavigatePage() {
     setStatus("Navigation stopped");
   }, [stopAudio]);
 
-  // ── Announce (What's Ahead) with timeout ──
-  const announceScene = useCallback(async () => {
-    // If currently speaking, stop it
-    if (isSpeakingRef.current) {
-      stopAudio();
-      setStatus("Stopped speaking");
-      return;
-    }
+  // ── Track whether an analysis call is in-flight ──
+  const analyzingRef = useRef(false);
 
+  // ── Announce (scene analysis) — called automatically every 3s during navigation ──
+  const announceScene = useCallback(async () => {
+    // Skip if already analyzing or currently speaking
+    if (analyzingRef.current || isSpeakingRef.current) return;
+
+    analyzingRef.current = true;
     setStatus("Analyzing scene...");
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 45000); // 45s timeout
     try {
       const video = document.querySelector("video");
       if (!video || !video.videoWidth) {
-        speak("Camera is not active. Please start the camera first.");
+        analyzingRef.current = false;
         return;
       }
 
@@ -268,7 +265,7 @@ export default function NavigatePage() {
       if (isNavigating && destination) {
         form.append(
           "navigation_context",
-          `User is heading to room ${destination}. Give verbal directions.`
+          `User is heading to room ${destination}. Give step-based verbal directions using number of steps.`
         );
       }
 
@@ -296,7 +293,7 @@ export default function NavigatePage() {
       setStatus(
         isNavigating
           ? `🧭 Room ${startRoom || "?"} → Room ${destination}`
-          : "Camera on — tap What's Ahead"
+          : "Connected — start camera and navigate"
       );
     } catch (err: any) {
       const msg =
@@ -304,11 +301,29 @@ export default function NavigatePage() {
           ? "Scene analysis timed out"
           : err.message || "Unknown error";
       setStatus("Error: " + msg);
-      speak("Something went wrong. Check the server connection.");
     } finally {
       clearTimeout(timer);
+      analyzingRef.current = false;
     }
-  }, [speak, stopAudio, isSpeakingRef, isNavigating, destination, startRoom]);
+  }, [speak, isSpeakingRef, isNavigating, destination, startRoom]);
+
+  // ── Auto-announce every 3 seconds while navigating with camera active ──
+  useEffect(() => {
+    if (!isNavigating || !cameraActive) return;
+
+    // Call once immediately when navigation starts
+    const initialDelay = setTimeout(() => announceScene(), 1000);
+
+    // Then repeat every 3 seconds
+    const interval = setInterval(() => {
+      announceScene();
+    }, 3000);
+
+    return () => {
+      clearTimeout(initialDelay);
+      clearInterval(interval);
+    };
+  }, [isNavigating, cameraActive, announceScene]);
 
   // ── Manual destination ──
   const handleManualGo = useCallback(() => {
@@ -462,17 +477,6 @@ export default function NavigatePage() {
             >
               <Square className="h-4 w-4" />
               Stop
-            </button>
-          )}
-
-          {/* What's Ahead */}
-          {isConnected && cameraActive && (
-            <button
-              onClick={announceScene}
-              className="flex items-center gap-2 rounded-full bg-blue-500 px-5 py-3 text-sm font-semibold text-white shadow-lg hover:bg-blue-400 transition-all"
-            >
-              <Eye className="h-4 w-4" />
-              What&apos;s Ahead
             </button>
           )}
 
